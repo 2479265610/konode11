@@ -1,0 +1,153 @@
+name: Sync upstream & release
+
+# Keeps this fork current with konabe-studio/konode and publishes a ready-to-install
+# zip carrying the Chinese bookmark-root fixes, automatically.
+#
+# Runs daily, or on demand via the "Run workflow" button on the Actions tab.
+# When the upstream has no new commits it exits without building or releasing anything.
+# When a merge conflicts (upstream touched the same two files as our patches) it aborts
+# and opens an issue instead of silently shipping a broken build.
+
+on:
+  schedule:
+    - cron: "23 3 * * *" # 03:23 UTC = 11:23 Beijing time
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    name: Merge upstream into main
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      behind: ${{ steps.merge.outputs.behind }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/konabe-studio/konode.git || true
+          git fetch upstream main
+
+      - name: Merge if behind, then push
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          behind=$(git rev-list --count HEAD..upstream/main)
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "Upstream commits not in this fork: $behind"
+
+          if [ "$behind" -eq 0 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already up to date. Skipping build and release."
+            exit 0
+          fi
+
+          if git merge upstream/main --no-edit; then
+            git push origin main
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Merged $behind upstream commit(s) and pushed to main."
+          else
+            git merge --abort
+            echo "::error::Merge conflict. Upstream changed a file our patches also touch. Manual resolution required."
+            gh issue create \
+              --repo "$REPO" \
+              --title "Automatic upstream sync hit a merge conflict" \
+              --body "The scheduled sync could not merge upstream/main into main because of a conflict. Our local patches touch \`src/lib/utils/bookmark-roots.ts\` and its test file; upstream likely changed the same code. Please resolve manually, then close this issue. Workflow run: ${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}" \
+              || true
+            exit 1
+          fi
+
+  release:
+    name: Build and publish patched zip
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      # Reuse the upstream release zip layout: manifest.json at the ZIP root.
+      # Strip the upstream "key" so this fork gets its own extension id (no clash with
+      # the store build), and stamp a fork version that stays above the previous one:
+      # upstream 1.6.0 -> 1.6.3, upstream 1.7.0 -> 1.7.3.
+      - name: Make no-conflict zip
+        id: pack
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const p = 'dist/manifest.json';
+          const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const upstream = require('./package.json').version;
+          const parts = upstream.split('.');
+          const forkVersion = parts.slice(0, 2).join('.') + '.3';
+          delete m.key;
+          m.version = forkVersion;
+          m.name = 'Konode (中文书签栏修复)';
+          fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
+          fs.writeFileSync('zh-version.txt', forkVersion);
+          console.log('Fork version:', forkVersion);
+          NODE
+          version=$(cat zh-version.txt)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          cd dist && zip -q -r "../konode-zh-fix-$version.zip" . && cd ..
+          echo "ZIP contents check:"
+          unzip -l "konode-zh-fix-$version.zip" | grep -E "manifest.json|background.js"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ steps.pack.outputs.version }}"
+          tag="zh-$version-$(date +%Y%m%d-%H%M)-${GITHUB_SHA::7}"
+          upstream_sha="${GITHUB_SHA::7}"
+
+          cat > release-notes.md <<EOF
+          ## Konode 中文书签栏修复版 $version
+
+          自动同步自上游 konabe-studio/konode（提交 $upstream_sha），已完成完整检查与测试。
+
+          ### 包含的修复
+          - 识别手机雨见的「移动设备书签」根，手机书签同步到电脑后落入收藏夹栏而非「其他收藏夹」。
+          - 中文根标题识别（书签栏 / 收藏夹栏 / 移动收藏夹等）。
+          - 手机根在本地无对应根时兜底到收藏夹栏。
+
+          ### 安装
+          - 电脑 Edge：下载 zip 并解压到固定文件夹，在 edge://extensions 开启开发者模式，选含 manifest.json 的那一层加载。
+          - 手机雨见：下载 zip，应用中心 → 管理我的应用 → 开发者模式 → 导入。
+
+          ### 注意
+          - 先卸载或禁用商店版 Konode，避免同一同步组出现两台设备互相覆盖。
+          - 已经错误落在「其他收藏夹」下的旧文件夹不会自动消失，归位生效后请手动删除。
+          - 浏览器扩展不会自动更新：每次这里发布新包后，需要在浏览器里重新加载一次。
+          EOF
+
+          gh release create "$tag" "konode-zh-fix-$version.zip" \
+            --title "Konode 中文书签栏修复版 $version" \
+            --notes-file release-notes.md
