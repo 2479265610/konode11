@@ -82,9 +82,41 @@ const WEBKIT_TITLE_KINDS: Record<string, RootKind> = {
   favorites: "bar",
 };
 
+// Localized (Chinese) permanent-root titles used by Chromium forks that don't
+// report `folderType` (pre-134 builds) and whose numeric root ids have been
+// renumbered (crbug 456225717 / Edge 142). A known localized root name is a
+// semantic signal from the engine, just like WebKit's "Favorites", so it is
+// treated as an override that beats the id tables. Without this, a Chinese-UI
+// phone Chromium fork whose "书签栏" root carries a nonstandard id is read as
+// `undefined`, sent to the default writable root, and lands in "Other bookmarks"
+// / "其他收藏夹" on the peer.
+const LOCALIZED_TITLE_KINDS: Record<string, RootKind> = {
+  // Chromium / Chrome / Brave / 360 / 雨见 — 书签 ("bookmarks")
+  "书签栏": "bar",
+  "书签栏(显示)": "bar",
+  "书签工具栏": "bar",
+  "其他书签": "other",
+  "移动书签": "mobile",
+  "移动设备书签": "mobile",
+  "管理的书签": "managed",
+  // Microsoft Edge zh-CN — 收藏夹 ("favorites")
+  "收藏夹栏": "bar",
+  "收藏夹栏(显示)": "bar",
+  "收藏夹工具栏": "bar",
+  "其他收藏夹": "other",
+  "移动收藏夹": "mobile",
+  "移动设备收藏夹": "mobile",
+  "托管收藏夹": "managed",
+  "管理的收藏夹": "managed",
+  // Firefox zh-CN
+  "书签菜单": "menu",
+};
+
 /** A root kind inferred from a well-known engine-specific root TITLE, if any. */
 export function rootKindFromTitle(title: string | undefined): RootKind | undefined {
-  return title ? WEBKIT_TITLE_KINDS[title.trim().toLowerCase()] : undefined;
+  if (!title) return undefined;
+  const key = title.trim().toLowerCase();
+  return WEBKIT_TITLE_KINDS[key] ?? LOCALIZED_TITLE_KINDS[key];
 }
 
 // Last-resort title table, for a root whose id we don't recognize on an engine that
@@ -132,7 +164,8 @@ export type RootLike = {
  * A root's kind, from the strongest signal available:
  *   1. the kind a peer already resolved and sent us (`rootKind` in the payload);
  *   2. the engine's own `folderType` (Chromium 134+) — renumbering-proof;
- *   3. the WebKit "Favorites" title override, which exists to CORRECT a misleading id;
+ *   3. a known engine-specific root title override — WebKit "Favorites" or a
+ *      localized Chinese root name — which CORRECTS a misleading/renumbered id;
  *   4. the per-engine id tables;
  *   5. a known English root title.
  */

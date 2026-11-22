@@ -99,6 +99,62 @@ describe("matchLocalRoot — Orion has TWO roots that answer to 'bar'", () => {
   });
 });
 
+// ── Localized (Chinese) root titles ──────────────────────────────────────────
+//
+// Chromium forks used on Chinese phones (e.g. 雨见 / 360) often ship a pre-134
+// engine with no `folderType` and renumbered root ids. Their permanent roots
+// carry localized titles; without recognizing those, the whole bar tree fell
+// into "Other bookmarks" on the peer.
+const ZH_ROOTS = [
+  { id: "11", title: "书签栏" },
+  { id: "12", title: "其他书签" },
+  { id: "13", title: "移动书签" },
+];
+
+const EDGE_ZH_ROOTS = [
+  { id: "31", title: "收藏夹栏" },
+  { id: "32", title: "其他收藏夹" },
+  { id: "33", title: "移动收藏夹" },
+];
+
+describe("rootKindOf — localized Chinese root titles", () => {
+  it("recognizes Chromium zh-CN bookmarks roots", () => {
+    expect(rootKindOf(ZH_ROOTS[0])).toBe("bar");
+    expect(rootKindOf(ZH_ROOTS[1])).toBe("other");
+    expect(rootKindOf(ZH_ROOTS[2])).toBe("mobile");
+  });
+
+  it("recognizes Edge zh-CN favorites roots", () => {
+    expect(rootKindOf(EDGE_ZH_ROOTS[0])).toBe("bar");
+    expect(rootKindOf(EDGE_ZH_ROOTS[1])).toBe("other");
+    expect(rootKindOf(EDGE_ZH_ROOTS[2])).toBe("mobile");
+  });
+
+  it("maps a renumbered Chinese bar onto Chrome's bar, not Other bookmarks", () => {
+    const m = matchLocalRootEx(ZH_ROOTS[0], CHROME_ROOTS, 0);
+    expect(m.id).toBe("1");
+    expect(m.confident).toBe(true);
+  });
+
+  it("maps a Chinese bar onto Edge zh '收藏夹栏'", () => {
+    expect(matchLocalRoot(ZH_ROOTS[0], EDGE_ZH_ROOTS, 0)).toBe("31");
+  });
+
+  it("lets a localized title override a misleading numeric id", () => {
+    // fork renumbered the bar to id "2" (Chrome's OTHER id) but titled it "书签栏"
+    expect(rootKindOf({ id: "2", title: "书签栏" })).toBe("bar");
+    expect(matchLocalRoot({ id: "2", title: "书签栏" }, CHROME_ROOTS, 0)).toBe("1");
+  });
+
+  it("still lets folderType win over a localized title", () => {
+    expect(rootKindOf({ id: "9", title: "其他收藏夹", folderType: "bookmarks-bar" })).toBe("bar");
+  });
+
+  it("does not type an ordinary folder that happens to be named '常用'", () => {
+    expect(rootKindOf({ id: "99", title: "常用" })).toBeUndefined();
+  });
+});
+
 describe("defaultOtherRootId", () => {
   it("picks the 'other' root on Chrome", () => {
     expect(defaultOtherRootId(CHROME_ROOTS)).toBe("2");
