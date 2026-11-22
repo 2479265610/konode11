@@ -126,13 +126,17 @@ export function rootKindFromTitle(title: string | undefined): RootKind | undefin
 }
 
 // Titles whose kind is authoritative even when the peer sent a different `rootKind`.
-// 雨见's 「手机书签」 root is mis-typed as `other` by the unpatched sender (its id falls
-// back to "other", or the guess lands there). On the receiver, `rootKindOf` normally
-// trusts the peer's `rootKind` FIRST — so a title-only patch would be ignored. These
-// titles override that value: their correct destination is the bar, full stop.
+// Chinese Android browsers (雨见 et al.) keep the ENTIRE bookmark library in one root.
+// The real title captured from a WebDAV payload is 「移动设备书签」, and the peer sends
+// rootKind `mobile`. On a desktop profile with NO Mobile-bookmarks root (common on Edge),
+// `mobile` hits defaultOtherRootId and the whole library lands in "Other bookmarks",
+// hidden from the user. These titles override the peer's value: in this fork their
+// destination is the visible bookmarks bar, full stop. `rootKindOf` normally trusts the
+// peer's `rootKind` FIRST — hence the explicit override.
 const FORCED_TITLE_KINDS: Record<string, RootKind> = {
   "手机书签": "bar",
   "手机收藏": "bar",
+  "移动设备书签": "bar",
 };
 
 /** A root kind that outranks even a peer-supplied `rootKind`, for known mis-typed titles. */
@@ -266,9 +270,12 @@ export function defaultOtherRootId(roots: RootLike[]): string | undefined {
  *   2. by exact id — same-browser fast path when kinds don't resolve;
  *   3. by (localized) title;
  *   → the above are `confident: true`.
- *   4a. kind RECOGNIZED but absent locally → the default writable root ("Other
- *       bookmarks"). A known absence, not an unknown root: Firefox's "menu" kind simply
- *       has no Chromium counterpart, so there is nothing for a positional guess to find.
+ *   4a. kind RECOGNIZED but absent locally → a sensible fallback. `mobile` lands on the
+ *       visible bar (Edge profiles often have no Mobile-bookmarks root, and burying the
+ *       whole phone library in "Other bookmarks" hides it); every other known-absent kind
+ *       → the default writable root ("Other bookmarks"). A known absence, not an unknown
+ *       root: Firefox's "menu" kind simply has no Chromium counterpart, so there is
+ *       nothing for a positional guess to find.
  *       Guessing by position used to fire FIRST here and drop the whole Bookmarks Menu
  *       into whichever local root happened to sit at that index — Chrome's bookmarks
  *       BAR when Firefox lists `menu________` first — contradicting this very comment.
@@ -315,6 +322,15 @@ export function matchLocalRootEx(
   if (title) {
     const byTitle = candidates.find((r) => r.title?.toLowerCase() === title);
     if (byTitle) return { id: byTitle.id, confident: true };
+  }
+  // A phone's `mobile` root is the common case where this desktop has NO counterpart
+  // (Edge profiles frequently expose only bar + other). Burying the whole phone library
+  // in "Other bookmarks" hides it; land it in the visible bar instead. Standard Chrome
+  // exposes a real Mobile bookmarks root and was already resolved by `byKind` above, so
+  // this only fires where there is genuinely nowhere else to put mobile content.
+  if (kind === "mobile") {
+    const bar = findLocalRootByKind(candidates, "bar");
+    if (bar) return { id: bar.id, confident: false };
   }
   // We know WHAT this root is, this browser just doesn't have one — skip the positional
   // guess entirely (see 4a above), so the result can't hinge on root enumeration order.

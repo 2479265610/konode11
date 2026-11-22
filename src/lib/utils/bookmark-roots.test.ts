@@ -188,6 +188,44 @@ describe("雨见 '手机书签' root — forced onto the bookmarks bar", () => {
   });
 });
 
+describe("雨见 '移动设备书签' root — real WebDAV payload", () => {
+  // Captured from the user's WebDAV sync files (2026-11-22):
+  //   phone (Android/Chromium): single root id=3 title="移动设备书签" rootKind=mobile
+  //   desktop Edge:             id=1 "收藏夹栏" (bar), id=18 "其他收藏夹" (other), NO mobile root
+  const PHONE_ROOT = { id: "3", title: "移动设备书签", rootKind: "mobile" as const };
+  const EDGE_NO_MOBILE = [
+    { id: "1", title: "收藏夹栏" },
+    { id: "18", title: "其他收藏夹" },
+  ];
+
+  it("forces '移动设备书签' to the bar on the receiver, outranking rootKind=mobile", () => {
+    expect(forcedKindFromTitle("移动设备书签")).toBe("bar");
+    const m = matchLocalRootEx(PHONE_ROOT, EDGE_NO_MOBILE, 0);
+    expect(m.id).toBe("1");
+    expect(m.confident).toBe(true);
+  });
+
+  it("recognizes '移动设备书签' as mobile on the sending side", () => {
+    // The title table maps it to mobile; the receiver's forced override is what
+    // redirects it to the bar — both halves are needed for either sync direction.
+    expect(rootKindOf({ id: "3", title: "移动设备书签" })).toBe("mobile");
+  });
+
+  it("falls back to the bar, not Other, for a mobile root when no local mobile root exists", () => {
+    // Covers a phone that sends no recognizable title (empty/English) but a correct
+    // rootKind=mobile: it must still avoid the default "Other bookmarks" sink.
+    const untitledMobile = { id: "3", title: "", rootKind: "mobile" as const };
+    const m = matchLocalRootEx(untitledMobile, EDGE_NO_MOBILE, 0);
+    expect(m.id).toBe("1");
+  });
+
+  it("still targets a real local mobile root when one exists (standard Chrome)", () => {
+    const untitledMobileOnChrome = { id: "3", title: "", rootKind: "mobile" as const };
+    const m = matchLocalRootEx(untitledMobileOnChrome, CHROME_ROOTS, 0);
+    expect(m.id).toBe("3");
+  });
+});
+
 describe("defaultOtherRootId", () => {
   it("picks the 'other' root on Chrome", () => {
     expect(defaultOtherRootId(CHROME_ROOTS)).toBe("2");
