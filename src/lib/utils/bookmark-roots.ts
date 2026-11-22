@@ -98,6 +98,12 @@ const LOCALIZED_TITLE_KINDS: Record<string, RootKind> = {
   "其他书签": "other",
   "移动书签": "mobile",
   "移动设备书签": "mobile",
+  // 雨见浏览器 (Yujian) 把它的根节点显示为「手机书签」，且该根下的文件夹就是用户
+  // 期望出现在桌面「收藏夹栏」的内容。此前该标题无法识别，会退回 id 表或位置猜测，
+  // 整棵树被误投到「其他收藏夹」。这里有意把它当作 bar：这样无论同步对端用的是
+  // 原版还是本补丁，payload 的 rootKind 都会解析到 bar，稳定落到「收藏夹栏」。
+  "手机书签": "bar",
+  "手机收藏": "bar",
   "管理的书签": "managed",
   // Microsoft Edge zh-CN — 收藏夹 ("favorites")
   "收藏夹栏": "bar",
@@ -117,6 +123,22 @@ export function rootKindFromTitle(title: string | undefined): RootKind | undefin
   if (!title) return undefined;
   const key = title.trim().toLowerCase();
   return WEBKIT_TITLE_KINDS[key] ?? LOCALIZED_TITLE_KINDS[key];
+}
+
+// Titles whose kind is authoritative even when the peer sent a different `rootKind`.
+// 雨见's 「手机书签」 root is mis-typed as `other` by the unpatched sender (its id falls
+// back to "other", or the guess lands there). On the receiver, `rootKindOf` normally
+// trusts the peer's `rootKind` FIRST — so a title-only patch would be ignored. These
+// titles override that value: their correct destination is the bar, full stop.
+const FORCED_TITLE_KINDS: Record<string, RootKind> = {
+  "手机书签": "bar",
+  "手机收藏": "bar",
+};
+
+/** A root kind that outranks even a peer-supplied `rootKind`, for known mis-typed titles. */
+export function forcedKindFromTitle(title: string | undefined): RootKind | undefined {
+  if (!title) return undefined;
+  return FORCED_TITLE_KINDS[title.trim().toLowerCase()];
 }
 
 // Last-resort title table, for a root whose id we don't recognize on an engine that
@@ -266,7 +288,10 @@ export function matchLocalRootEx(
   localRoots: RootLike[],
   index: number,
 ): { id: string | undefined; confident: boolean } {
-  const kind = rootKindOf(remoteRoot);
+  // A handful of Chinese-phone roots are mis-typed by unpatched senders. Their known
+  // title wins over the peer's rootKind so a receiver-side-only update still fixes them.
+  const forced = forcedKindFromTitle(remoteRoot.title);
+  const kind = forced ?? rootKindOf(remoteRoot);
   // Enterprise-policy roots ("Managed bookmarks") reject every write, so the local one is
   // a candidate for NOTHING: not the kind match, not the id fast path — a same-browser
   // peer shares that id, which is how a peer's managed root was resolving to ours — not

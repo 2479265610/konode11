@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   rootKind, rootKindFromTitle, rootKindFromFolderType, rootKindOf, asRootKind,
+  forcedKindFromTitle,
   defaultOtherRootId, findLocalRootByKind, matchLocalRoot, matchLocalRootEx,
 } from "./bookmark-roots";
 
@@ -152,6 +153,38 @@ describe("rootKindOf — localized Chinese root titles", () => {
 
   it("does not type an ordinary folder that happens to be named '常用'", () => {
     expect(rootKindOf({ id: "99", title: "常用" })).toBeUndefined();
+  });
+});
+
+describe("雨见 '手机书签' root — forced onto the bookmarks bar", () => {
+  const YUJIAN_ROOT = { id: "3", title: "手机书签" };
+
+  it("recognizes '手机书签' as a bar on the sending side", () => {
+    expect(rootKindOf(YUJIAN_ROOT)).toBe("bar");
+    expect(rootKindOf({ id: "77", title: "手机收藏" })).toBe("bar");
+  });
+
+  it("exposes a forced kind that outranks a peer-supplied rootKind", () => {
+    expect(forcedKindFromTitle("手机书签")).toBe("bar");
+    expect(forcedKindFromTitle(" 手机书签 ")).toBe("bar");
+    expect(forcedKindFromTitle("常用")).toBeUndefined();
+  });
+
+  it("maps onto the local bar on Chrome and Edge zh", () => {
+    expect(matchLocalRoot(YUJIAN_ROOT, CHROME_ROOTS, 2)).toBe("1");
+    expect(matchLocalRoot(YUJIAN_ROOT, EDGE_ZH_ROOTS, 2)).toBe("31");
+  });
+
+  it("overrides an unpatched peer that mis-sent rootKind 'other'", () => {
+    const misTagged = { ...YUJIAN_ROOT, rootKind: "other" as const };
+    const m = matchLocalRootEx(misTagged, CHROME_ROOTS, 1);
+    expect(m.id).toBe("1");
+    expect(m.confident).toBe(true);
+  });
+
+  it("overrides a mis-sent rootKind 'mobile' too", () => {
+    const misTagged = { ...YUJIAN_ROOT, rootKind: "mobile" as const };
+    expect(matchLocalRoot(misTagged, EDGE_ZH_ROOTS, 2)).toBe("31");
   });
 });
 
