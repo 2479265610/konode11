@@ -245,6 +245,33 @@
   "provider_gdrive_hint": {
     "message": "Google-Konto"
   },
+  "provider_dropbox_desc": {
+    "message": "Synchronisiert in einen eigenen Ordner in deiner Dropbox. Konode sieht dort nichts anderes, und das Zugriffstoken wird nur auf diesem Gerät gespeichert."
+  },
+  "provider_dropbox_hint": {
+    "message": "Dropbox-Konto"
+  },
+  "opt_dropbox_unavailable": {
+    "message": "Die Dropbox-Anmeldung ist in diesem Browser nicht verfügbar. Wähle eine andere Option."
+  },
+  "onb_sign_in_dropbox": {
+    "message": "Mit Dropbox anmelden"
+  },
+  "opt_dropbox_folder_hint": {
+    "message": "Konode legt seine Dateien in $FOLDER$ in deiner Dropbox ab und kann außerhalb dieses Ordners nichts öffnen.",
+    "placeholders": {
+      "folder": {
+        "content": "$1",
+        "example": "Apps/Konode"
+      }
+    }
+  },
+  "dropbox_err_perms": {
+    "message": "Konode braucht die Berechtigung, Dropbox zu erreichen. Erlaube sie, wenn der Browser fragt, und versuche es dann erneut."
+  },
+  "dropbox_err_perms_no_prompt": {
+    "message": "Dieser Browser kann keine Berechtigungsdialoge anzeigen, daher konnte Konode nicht um Zugriff auf Dropbox bitten. Erteile ihn auf der Berechtigungsseite von Konode in den Erweiterungseinstellungen deines Browsers und versuche es dann erneut."
+  },
   "provider_nextcloud_desc": {
     "message": "Dein eigener Nextcloud- oder ownCloud-Server."
   },
@@ -301,6 +328,33 @@
   },
   "provider_github_hint": {
     "message": "Privates Repository"
+  },
+  "provider_gitea_desc": {
+    "message": "Deine Sync-Daten liegen in einem privaten Repository auf deinem eigenen Gitea- oder Forgejo-Server, auf das Konode mit einem Zugriffstoken zugreift."
+  },
+  "provider_gitea_hint": {
+    "message": "Eigener Git-Server"
+  },
+  "provider_gitea_note": {
+    "message": "Erstelle den Token auf deinem Server unter Einstellungen → Anwendungen und setze die Berechtigung repository auf Lesen und Schreiben. Erlaube Konode danach den Zugriff auf deinen Server, wenn der Browser fragt."
+  },
+  "opt_gitea_token_label": {
+    "message": "Zugriffstoken"
+  },
+  "gitea_token_link": {
+    "message": "Zugriffstoken auf deinem Server erstellen →"
+  },
+  "gitea_err_http": {
+    "message": "Konode verbindet sich nicht über http:// mit einem Gitea- oder Forgejo-Server, weil dein Zugriffstoken sonst bei jeder Anfrage unverschlüsselt übertragen würde. Verwende eine https://-Adresse. http:// funktioniert nur für einen Server auf diesem Computer (localhost)."
+  },
+  "gitea_err_perms": {
+    "message": "Konode braucht die Berechtigung, deinen Gitea- oder Forgejo-Server zu erreichen. Erlaube sie, wenn der Browser fragt, und versuche es dann erneut."
+  },
+  "gitea_err_perms_no_prompt": {
+    "message": "Dieser Browser kann keine Berechtigungsdialoge anzeigen, daher konnte Konode nicht um Zugriff auf deinen Gitea- oder Forgejo-Server bitten. Erteile ihn auf der Berechtigungsseite von Konode in den Erweiterungseinstellungen deines Browsers und versuche es dann erneut."
+  },
+  "gitea_err_bad_url": {
+    "message": "Gib die Adresse deines Servers ein, zum Beispiel git.example.com."
   },
   "provider_webdav_desc": {
     "message": "Synology, kDrive oder ein beliebiger anderer WebDAV-Server."
@@ -665,6 +719,9 @@
   "opt_save_changes": {
     "message": "Änderungen speichern"
   },
+  "opt_unsaved_changes": {
+    "message": "Ungespeicherte Änderungen in diesem oder einem anderen Bereich. Beim Speichern werden alle übernommen."
+  },
   "opt_nav_backend": {
     "message": "Speicher"
   },
@@ -880,6 +937,12 @@
   },
   "opt_notifications_desc": {
     "message": "Synchronisierungsstatus und Konflikthinweise."
+  },
+  "opt_send_menu_label": {
+    "message": "„An Gerät senden“ im Kontextmenü"
+  },
+  "opt_send_menu_desc": {
+    "message": "Zeigt „An Gerät senden“, wenn du mit der rechten Maustaste auf eine Seite oder einen Link klickst. Der Papierflieger-Button im Popup funktioniert in jedem Fall."
   },
   "opt_interval_label": {
     "message": "Synchronisierungsintervall"
@@ -1699,9 +1762,6 @@
   },
   "send_menu_title": {
     "message": "An Gerät senden"
-  },
-  "send_menu_none": {
-    "message": "Noch kann kein Gerät Tabs empfangen"
   },
   "popup_send_label": {
     "message": "Diesen Tab senden"

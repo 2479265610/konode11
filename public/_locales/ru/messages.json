@@ -245,6 +245,33 @@
   "provider_gdrive_hint": {
     "message": "Аккаунт Google"
   },
+  "provider_dropbox_desc": {
+    "message": "Синхронизация в отдельную папку в вашем Dropbox. Ничего другого там Konode не видит, а токен доступа хранится только на этом устройстве."
+  },
+  "provider_dropbox_hint": {
+    "message": "Аккаунт Dropbox"
+  },
+  "opt_dropbox_unavailable": {
+    "message": "Вход через Dropbox в этом браузере недоступен. Выберите другой вариант."
+  },
+  "onb_sign_in_dropbox": {
+    "message": "Войти через Dropbox"
+  },
+  "opt_dropbox_folder_hint": {
+    "message": "Konode хранит свои файлы в папке $FOLDER$ вашего Dropbox и не может открыть ничего за её пределами.",
+    "placeholders": {
+      "folder": {
+        "content": "$1",
+        "example": "Apps/Konode"
+      }
+    }
+  },
+  "dropbox_err_perms": {
+    "message": "Konode нужно разрешение на доступ к Dropbox. Разрешите его, когда браузер спросит, и повторите попытку."
+  },
+  "dropbox_err_perms_no_prompt": {
+    "message": "Этот браузер не умеет показывать запросы разрешений, поэтому Konode не смог запросить доступ к Dropbox. Предоставьте его на странице разрешений Konode в настройках расширений браузера, а затем повторите попытку."
+  },
   "provider_nextcloud_desc": {
     "message": "Ваш собственный сервер Nextcloud или ownCloud."
   },
@@ -301,6 +328,33 @@
   },
   "provider_github_hint": {
     "message": "Приватный репозиторий"
+  },
+  "provider_gitea_desc": {
+    "message": "Синхронизированные данные хранятся в приватном репозитории на вашем собственном сервере Gitea или Forgejo, к которому Konode получает доступ с помощью токена доступа."
+  },
+  "provider_gitea_hint": {
+    "message": "Ваш Git-сервер"
+  },
+  "provider_gitea_note": {
+    "message": "Создайте токен на своём сервере в разделе «Настройки → Приложения», выставив разрешение repository на «Чтение и запись». Затем разрешите Konode доступ к серверу, когда браузер спросит."
+  },
+  "opt_gitea_token_label": {
+    "message": "Токен доступа"
+  },
+  "gitea_token_link": {
+    "message": "Создать токен доступа на вашем сервере →"
+  },
+  "gitea_err_http": {
+    "message": "Konode не подключается к серверу Gitea или Forgejo по http://, потому что токен доступа передавался бы без шифрования при каждом запросе. Используйте адрес https://. http:// работает только для сервера на этом компьютере (localhost)."
+  },
+  "gitea_err_perms": {
+    "message": "Konode нужно разрешение на доступ к вашему серверу Gitea или Forgejo. Разрешите его, когда браузер спросит, и повторите попытку."
+  },
+  "gitea_err_perms_no_prompt": {
+    "message": "Этот браузер не умеет показывать запросы разрешений, поэтому Konode не смог запросить доступ к вашему серверу Gitea или Forgejo. Предоставьте его на странице разрешений Konode в настройках расширений браузера, а затем повторите попытку."
+  },
+  "gitea_err_bad_url": {
+    "message": "Укажите адрес вашего сервера, например git.example.com."
   },
   "provider_webdav_desc": {
     "message": "Synology, kDrive или любой другой сервер WebDAV."
@@ -665,6 +719,9 @@
   "opt_save_changes": {
     "message": "Сохранить изменения"
   },
+  "opt_unsaved_changes": {
+    "message": "Есть несохранённые изменения в этом или другом разделе. При сохранении применяются все."
+  },
   "opt_nav_backend": {
     "message": "Хранилище"
   },
@@ -880,6 +937,12 @@
   },
   "opt_notifications_desc": {
     "message": "Статус синхронизации и оповещения о конфликтах."
+  },
+  "opt_send_menu_label": {
+    "message": "«Отправить на устройство» в контекстном меню"
+  },
+  "opt_send_menu_desc": {
+    "message": "Показывает «Отправить на устройство», когда вы щёлкаете правой кнопкой мыши по странице или ссылке. Кнопка с бумажным самолётиком во всплывающем окне работает в любом случае."
   },
   "opt_interval_label": {
     "message": "Интервал синхронизации"
@@ -1699,9 +1762,6 @@
   },
   "send_menu_title": {
     "message": "Отправить на устройство"
-  },
-  "send_menu_none": {
-    "message": "Пока ни одно устройство не может принимать вкладки"
   },
   "popup_send_label": {
     "message": "Отправить эту вкладку"

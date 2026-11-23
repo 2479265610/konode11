@@ -245,6 +245,33 @@
   "provider_gdrive_hint": {
     "message": "Google-fiók"
   },
+  "provider_dropbox_desc": {
+    "message": "Szinkronizálás egy saját mappába a Dropboxodon. A Konode semmi mást nem lát ott, a hozzáférési token pedig csak ezen az eszközön tárolódik."
+  },
+  "provider_dropbox_hint": {
+    "message": "Dropbox-fiók"
+  },
+  "opt_dropbox_unavailable": {
+    "message": "A Dropbox-bejelentkezés ebben a böngészőben nem működik. Válassz másik lehetőséget."
+  },
+  "onb_sign_in_dropbox": {
+    "message": "Bejelentkezés Dropbox-fiókkal"
+  },
+  "opt_dropbox_folder_hint": {
+    "message": "A Konode a fájljait a Dropboxod $FOLDER$ mappájába teszi, és azon kívül semmit sem tud megnyitni.",
+    "placeholders": {
+      "folder": {
+        "content": "$1",
+        "example": "Apps/Konode"
+      }
+    }
+  },
+  "dropbox_err_perms": {
+    "message": "A Konode-nak engedély kell a Dropbox eléréséhez. Engedélyezd, amikor a böngésző rákérdez, majd próbáld újra."
+  },
+  "dropbox_err_perms_no_prompt": {
+    "message": "Ez a böngésző nem tud engedélykérő ablakot megjeleníteni, ezért a Konode nem tudott hozzáférést kérni a Dropboxhoz. Engedélyezd a hozzáférést a Konode bővítménybeállításainál a böngésződben, majd próbáld meg újra."
+  },
   "provider_nextcloud_desc": {
     "message": "A saját Nextcloud vagy ownCloud szervered."
   },
@@ -301,6 +328,33 @@
   },
   "provider_github_hint": {
     "message": "Privát GitHub-repó"
+  },
+  "provider_gitea_desc": {
+    "message": "A szinkronizált adatok a saját Gitea- vagy Forgejo-szervered egy privát repójában tárolódnak, amelyhez hozzáférési tokennel fér hozzá a Konode."
+  },
+  "provider_gitea_hint": {
+    "message": "Saját Git-szerver"
+  },
+  "provider_gitea_note": {
+    "message": "A tokent a szervereden a Beállítások → Alkalmazások oldalon hozd létre, a repository jogosultságot Read and Write értékre állítva. Utána engedélyezd, hogy a Konode elérje a szerveredet, amikor a böngésző rákérdez."
+  },
+  "opt_gitea_token_label": {
+    "message": "Hozzáférési token"
+  },
+  "gitea_token_link": {
+    "message": "Hozzáférési token létrehozása a szervereden →"
+  },
+  "gitea_err_http": {
+    "message": "A Konode nem kapcsolódik Gitea- vagy Forgejo-szerverhez http:// címen, mert a hozzáférési tokened minden kéréssel titkosítatlanul utazna. Használj https:// címet. A http:// csak ezen a gépen futó szerverhez (localhost) működik."
+  },
+  "gitea_err_perms": {
+    "message": "A Konode-nak engedély kell a Gitea- vagy Forgejo-szervered eléréséhez. Engedélyezd, amikor a böngésző rákérdez, majd próbáld újra."
+  },
+  "gitea_err_perms_no_prompt": {
+    "message": "Ez a böngésző nem tud engedélykérő ablakot megjeleníteni, ezért a Konode nem tudott hozzáférést kérni a Gitea- vagy Forgejo-szerveredhez. Engedélyezd a hozzáférést a Konode bővítménybeállításainál a böngésződben, majd próbáld meg újra."
+  },
+  "gitea_err_bad_url": {
+    "message": "Add meg a szervered címét, például: git.example.com."
   },
   "provider_webdav_desc": {
     "message": "Synology, kDrive vagy bármelyik más WebDAV szerver."
@@ -665,6 +719,9 @@
   "opt_save_changes": {
     "message": "Változások mentése"
   },
+  "opt_unsaved_changes": {
+    "message": "Nem mentett változások ezen vagy egy másik fülön. A mentés mindegyiket alkalmazza."
+  },
   "opt_nav_backend": {
     "message": "Tárhely"
   },
@@ -880,6 +937,12 @@
   },
   "opt_notifications_desc": {
     "message": "Szinkronizálási állapot és ütközési figyelmeztetések."
+  },
+  "opt_send_menu_label": {
+    "message": "Küldés eszközre a jobb gombos menüben"
+  },
+  "opt_send_menu_desc": {
+    "message": "Megjeleníti a Küldés eszközre pontot, ha jobb gombbal egy oldalra vagy linkre kattintasz. A felugró ablak papírrepülő gombja mindkét esetben működik."
   },
   "opt_interval_label": {
     "message": "Szinkronizálási időköz"
@@ -1699,9 +1762,6 @@
   },
   "send_menu_title": {
     "message": "Küldés eszközre"
-  },
-  "send_menu_none": {
-    "message": "Még egyik eszköz sem tud lapot fogadni"
   },
   "popup_send_label": {
     "message": "Lap küldése"

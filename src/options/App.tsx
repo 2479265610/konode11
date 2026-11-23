@@ -6,6 +6,9 @@ import { DORMANT_DEVICE_DAYS, isDormant, relativeTime } from "@/lib/device-activ
 import { ENGINE_LABEL } from "@/lib/utils/browser-identity";
 import { interactiveSignIn, isDriveAuthAvailable, clearGDriveSession } from "@/lib/backends/gdrive-oauth";
 import {
+  interactiveDropboxSignIn, isDropboxAuthAvailable, clearDropboxSession, getStoredDropboxUser, DROPBOX_ORIGINS,
+} from "@/lib/backends/dropbox-oauth";
+import {
   allDataTypeAvailability, dataTypeAvailability, dataTypeApiPresent, ensurePermission,
   hasPermission, unsupportedReason, eventPresent, permissionsToEnable, tabGroupsAskable,
   type Availability, type PermissionOutcome,
@@ -27,6 +30,11 @@ import {
 // Interactive Google sign-in isn't supported on every engine (e.g. iOS WebKit /
 // Orion); gate the Drive sign-in so users get a note instead of a dead end.
 const DRIVE_AVAILABLE = isDriveAuthAvailable();
+// Dropbox signs in through the same auth window, so the same engines lack it.
+const DROPBOX_AVAILABLE = isDropboxAuthAvailable();
+/** A sign-in card this browser cannot complete: dimmed and said so on the tile. */
+const signInOff = (p: { signIn?: boolean; backend: BackendType }): boolean =>
+  !!p.signIn && !(p.backend === "dropbox" ? DROPBOX_AVAILABLE : DRIVE_AVAILABLE);
 import {
   Github, Info,
   Puzzle, AlertTriangle, CheckCircle2, XCircle,
@@ -44,6 +52,9 @@ const APP_VERSION = browser.runtime.getManifest().version;
 // there; following it also ends the popup's one-time card (lib/rate-prompt.ts), so nobody
 // is asked for a rating they already gave. Null on a build no store knows.
 const REVIEW_PAGE = reviewPageFor(browser.runtime.id);
+// Firefox for Android has no context menus for extensions, so the switch that takes "Send to
+// device" out of the right-click menu would switch nothing there.
+const hasContextMenus = menusApi() !== null;
 
 function useScrollEdges<T extends HTMLElement>(axis: "x" | "y", revision: unknown = 0) {
   // A CALLBACK ref, not useRef, and that distinction was the whole bug. The audit list
@@ -91,9 +102,11 @@ function BrandMark({ size = 14, color = "currentColor" }: { size?: number; color
 }
 
 import { generateRecoveryKey, MIN_PASSPHRASE_LENGTH } from "@/lib/crypto/encryption";
-import { KEYS, normalizeRemoteExtensions, setRateAnswered, type AuditEntry } from "@/lib/utils/storage";
+import { KEYS, normalizeRemoteExtensions, sendContextMenuOn, setRateAnswered, type AuditEntry } from "@/lib/utils/storage";
+import { menusApi } from "@/lib/sent-tabs-browser";
 import { auditLogText } from "@/lib/utils/audit-text";
-import { isRefusedHttpUrl, isSafeContentUrl } from "@/lib/utils/url";
+import { isRefusedHttpUrl, isSafeContentUrl, isSecureBackendUrl } from "@/lib/utils/url";
+import { forgeBaseUrl } from "@/lib/backends/gitea-backend";
 import { defaultOtherRootId } from "@/lib/utils/bookmark-roots";
 import { browser, currentStore } from "@/lib/utils/ext";
 import { missingLocally, installOrSearchUrl, storeUrlFor, inferStore, STORE_NAME, type LocalExtLike } from "@/lib/utils/extensions-match";
@@ -391,6 +404,11 @@ export default function OptionsApp() {
   const [gdriveConnecting, setGdriveConnecting] = useState(false);
   const [gdriveError, setGdriveError]         = useState<string | null>(null);
 
+  // Dropbox, the same three as Drive
+  const [dropboxUser, setDropboxUser]             = useState<{ email: string; displayName: string } | null>(null);
+  const [dropboxConnecting, setDropboxConnecting] = useState(false);
+  const [dropboxError, setDropboxError]           = useState<string | null>(null);
+
   // GitHub user info (fetched after token entry)
   const [githubUser, setGithubUser] = useState<{ login: string; name: string } | null>(null);
   const [githubChecking, setGithubChecking] = useState(false);
@@ -523,6 +541,9 @@ export default function OptionsApp() {
       const s = r[KEYS.GDRIVE_SESSION];
       if (s) setGdriveUser({ email: s.email ?? "", displayName: s.displayName ?? "" });
     }).catch(() => { /* no session to show is the normal case, not an error */ });
+    void getStoredDropboxUser().then((u) => {
+      if (u) setDropboxUser({ email: u.email, displayName: u.displayName });
+    }).catch(() => { /* as above */ });
     loadRemoteExtensions();
   }, [load, loadRemoteExtensions]);
 
@@ -724,16 +745,19 @@ export default function OptionsApp() {
     const ab = settings.active_backend;
     const w = settings.backends.find((b) => b.type === "webdav")?.webdav;
     const g = settings.backends.find((b) => b.type === "github")?.github;
+    const ge = settings.backends.find((b) => b.type === "gitea")?.gitea;
     const configured =
       ab === "gdrive" ? !!gdriveUser
+      : ab === "dropbox" ? !!dropboxUser
       : ab === "webdav" ? !!(w?.url && w?.username && w?.password)
       : ab === "github" ? !!(g?.token && g?.repo)
+      : ab === "gitea" ? !!(ge?.url && ge?.token && ge?.repo)
       : false;
     if (configured && settings.enabled_types.length > 0) {
       update({ onboarding_completed: true });
       void sendMessage({ type: "SAVE_SETTINGS", payload: { onboarding_completed: true } });
     }
-  }, [settings, gdriveUser]);
+  }, [settings, gdriveUser, dropboxUser]);
 
   /** A false positive here is harmless (Save stays clickable); a false negative would not
    *  be, which is why nothing is ever disabled on the strength of it. */
@@ -816,6 +840,12 @@ export default function OptionsApp() {
   const scopeHint = () => {
     const [before, after] = tParts("opt_gdrive_scope_hint");
     return <>{before}<code>drive.file</code>{after}</>;
+  };
+
+  // The App folder by its path, a literal like the Drive scope above.
+  const dropboxFolderHint = () => {
+    const [before, after] = tParts("opt_dropbox_folder_hint");
+    return <>{before}<code>Apps/Konode</code>{after}</>;
   };
 
   // The word carrying the warning is emphasised, so it is its own key dropped into the
@@ -1015,6 +1045,25 @@ export default function OptionsApp() {
           ? t("opt_err_perms_bad_url")
           : t("opt_err_perms_denied");
 
+  // Gitea / Forgejo: the instance is a host of the user's own, like a WebDAV server, so the
+  // same rules hold: http is refused before the prompt (#83), and the request is the first
+  // thing awaited, so it keeps the click's gesture (`forgeBaseUrl` is synchronous).
+  const requestGiteaHostPermission = async (): Promise<PermissionOutcome | "bad-url" | "insecure"> => {
+    const base = forgeBaseUrl(getBackend("gitea")?.gitea?.url);
+    if (!base) return "bad-url";
+    if (!isSecureBackendUrl(base)) return "insecure";
+    return await ensurePermission({ origins: [new URL(base).origin + "/*"] });
+  };
+
+  const giteaPermissionError = (outcome: PermissionOutcome | "bad-url" | "insecure"): string =>
+    outcome === "insecure"
+      ? t("gitea_err_http")
+      : outcome === "cannot-prompt"
+        ? t("gitea_err_perms_no_prompt")
+        : outcome === "bad-url"
+          ? t("gitea_err_bad_url")
+          : t("gitea_err_perms");
+
   const save = async () => {
     if (!settings) return;
     setSaveError(null);
@@ -1030,6 +1079,22 @@ export default function OptionsApp() {
       const outcome = await requestWebdavHostPermission();
       if (outcome !== "granted") {
         setSaveError(webdavPermissionError(outcome));
+        return;
+      }
+    }
+    if (settings.active_backend === "gitea") {
+      const outcome = await requestGiteaHostPermission();
+      if (outcome !== "granted") {
+        setSaveError(giteaPermissionError(outcome));
+        return;
+      }
+    }
+    // Asked at sign-in already; asked again here, without a prompt when held, for a device
+    // whose permission was taken back in the browser's settings since.
+    if (settings.active_backend === "dropbox") {
+      const outcome = await ensurePermission({ origins: DROPBOX_ORIGINS });
+      if (outcome !== "granted") {
+        setSaveError(outcome === "cannot-prompt" ? t("dropbox_err_perms_no_prompt") : t("dropbox_err_perms"));
         return;
       }
     }
@@ -1091,7 +1156,7 @@ export default function OptionsApp() {
               assume it was dropped, and then have it go out with an unrelated save later. */}
           {dirty && !saveError && (
             <span className="unsaved-note">
-              <AlertTriangle size={12} /> Unsaved changes on this or another tab. Saving applies all of them.
+              <AlertTriangle size={12} /> {t("opt_unsaved_changes")}
             </span>
           )}
         </div>
@@ -1105,6 +1170,13 @@ export default function OptionsApp() {
       const outcome = await requestWebdavHostPermission();
       if (outcome !== "granted") {
         setTestStatus({ ok: false, message: webdavPermissionError(outcome) });
+        return;
+      }
+    }
+    if (settings.active_backend === "gitea") {
+      const outcome = await requestGiteaHostPermission();
+      if (outcome !== "granted") {
+        setTestStatus({ ok: false, message: giteaPermissionError(outcome) });
         return;
       }
     }
@@ -1208,6 +1280,39 @@ export default function OptionsApp() {
     void clearGDriveSession().catch(() => {});
     setGdriveUser(null);
     if (settings?.active_backend === "gdrive") update({ active_backend: null });
+  };
+
+  // ─── Dropbox OAuth ─────────────────────────────────────────────────────
+
+  /** Dropbox's two API hosts first, while the click's gesture is still live (see
+   *  `ensurePermission`), then the sign-in window. Signing in without them would only
+   *  succeed for the first sync to fail on a missing permission. */
+  const connectDropbox = async () => {
+    setDropboxConnecting(true); setDropboxError(null);
+    try {
+      const outcome = await ensurePermission({ origins: DROPBOX_ORIGINS });
+      if (outcome !== "granted") {
+        setDropboxError(outcome === "cannot-prompt" ? t("dropbox_err_perms_no_prompt") : t("dropbox_err_perms"));
+        return;
+      }
+      const s = await interactiveDropboxSignIn();
+      setDropboxUser({ email: s.email, displayName: s.displayName });
+      // The account goes into the config, which the destination tag is built from: a
+      // device moved to another Dropbox account then uploads everything into it again.
+      updateBackend("dropbox", { dropbox: { account: s.account_id } });
+      update({ active_backend: "dropbox" });
+    } catch (err) {
+      setDropboxError(err instanceof Error ? err.message : t("opt_gdrive_connect_failed"));
+    } finally {
+      setDropboxConnecting(false);
+    }
+  };
+
+  const disconnectDropbox = () => {
+    // Forgets the session here and revokes its token at Dropbox (best effort).
+    void clearDropboxSession().catch(() => {});
+    setDropboxUser(null);
+    if (settings?.active_backend === "dropbox") update({ active_backend: null });
   };
 
   // ─── Export ───────────────────────────────────────────────────────────
@@ -1401,8 +1506,10 @@ export default function OptionsApp() {
   const activeBackendConfigured = (() => {
     const ab = settings.active_backend;
     if (ab === "gdrive") return !!gdriveUser;
+    if (ab === "dropbox") return !!dropboxUser;
     if (ab === "webdav") { const w = getBackend("webdav")?.webdav; return !!(w?.url && w?.username && w?.password); }
     if (ab === "github") { const g = getBackend("github")?.github; return !!(g?.token && g?.repo); }
+    if (ab === "gitea") { const g = getBackend("gitea")?.gitea; return !!(g?.url && g?.token && g?.repo); }
     return false;
   })();
   const setupComplete = activeBackendConfigured && settings.enabled_types.length > 0;
@@ -1491,8 +1598,8 @@ export default function OptionsApp() {
                   under ITS row. Eight cards stacked with one expanded pushed most of the
                   choices below the fold; as tiles they stay in view while one is open, and the
                   panel sits next to the tile it belongs to rather than at the end. Two columns,
-                  so eight providers fill every row and a translated hint fits on one line;
-                  one on a phone. `gridCols` must say what the CSS draws, since it decides
+                  so a translated hint fits on one line; one on a phone. Nine providers since
+                  Gitea / Forgejo, so the catch-all WebDAV tile sits alone in the last row. `gridCols` must say what the CSS draws, since it decides
                   which tile the panel follows. */}
               <div className="provider-grid">
                 {(() => {
@@ -1503,9 +1610,9 @@ export default function OptionsApp() {
                     // Selection drives the panel; only the persisted provider earns "active".
                     const isSel = selectedProvider === card.id;
                     const isSaved = savedProvider === card.id;
-                    // No Google sign-in here at all (Firefox for Android has no identity API):
+                    // No sign-in window here at all (Firefox for Android has no identity API):
                     // said on the tile itself, as an unsupported data type is, not only once picked.
-                    const tileOff = card.id === "gdrive" && !DRIVE_AVAILABLE;
+                    const tileOff = signInOff(card);
                     return (
                       <Fragment key={card.id}>
                         <div
@@ -1536,13 +1643,44 @@ export default function OptionsApp() {
                     // each card carried its own.
                     const p = cards[sel];
                     const isActive = true;
-                    const driveOff = p.id === "gdrive" && !DRIVE_AVAILABLE;
+                    const signInUnavailable = p.backend === "dropbox" ? t("opt_dropbox_unavailable") : t("opt_drive_unavailable");
                     return (
                     <div className="provider-panel" role="group" aria-label={providerLabel(p)}>
                       <div className="provider-panel-head">
                         <div className="provider-panel-name">{providerLabel(p)}</div>
-                        <div className="backend-desc">{driveOff ? t("opt_drive_unavailable") : t(p.descKey)}</div>
+                        <div className="backend-desc">{signInOff(p) ? signInUnavailable : t(p.descKey)}</div>
                       </div>
+
+                      {/* ── Dropbox: a sign-in and nothing to type, like Drive ── */}
+                      {isActive && p.backend === "dropbox" && (
+                        <div className="backend-config" onClick={(e) => e.stopPropagation()}>
+                          {dropboxUser ? (
+                            <div className="account-row">
+                              <div className="account-avatar"><User size={14} /></div>
+                              <div className="account-info">
+                                <div className="account-name"><bdi>{dropboxUser.displayName}</bdi></div>
+                                <div className="account-email">{dropboxUser.email}</div>
+                              </div>
+                              <button className="btn-disconnect" onClick={disconnectDropbox}>
+                                <LogOut size={12} /> {t("opt_drive_disconnect")}
+                              </button>
+                            </div>
+                          ) : signInOff(p) ? (
+                            <div className="error-row">
+                              <XCircle size={12} /> {signInUnavailable}
+                            </div>
+                          ) : (
+                            <div>
+                              <button className="btn-connect-google" onClick={connectDropbox} disabled={dropboxConnecting}>
+                                {dropboxConnecting ? <Loader2 size={14} className="spin" /> : <ProviderLogo id="dropbox" size={16} color="#0061FE" />}
+                                {dropboxConnecting ? t("onb_connecting") : t("onb_sign_in_dropbox")}
+                              </button>
+                              {dropboxError && <div className="error-row"><XCircle size={12} /> {dropboxError}</div>}
+                            </div>
+                          )}
+                          <InfoHint>{dropboxFolderHint()}</InfoHint>
+                        </div>
+                      )}
 
                       {/* ── Google Drive ── */}
                       {isActive && p.id === "gdrive" && (
@@ -1749,6 +1887,72 @@ export default function OptionsApp() {
                           </a>
                         </div>
                       )}
+
+                      {/* ── Gitea / Forgejo: the GitHub fields plus the instance's address.
+                          Its own config block, so a token typed here never goes to GitHub. ── */}
+                      {isActive && p.backend === "gitea" && (() => {
+                        const g = getBackend("gitea")?.gitea;
+                        const setG = (patch: Partial<NonNullable<BackendConfig["gitea"]>>) =>
+                          updateBackend("gitea", { gitea: { ...getBackend("gitea")?.gitea, ...patch } });
+                        const base = forgeBaseUrl(g?.url);
+                        return (
+                          <div className="backend-config" onClick={(e) => e.stopPropagation()}>
+                            <div className="field-group">
+                              <label className="field-label">{t("opt_webdav_host_label")}</label>
+                              <input
+                                className="field-input mono"
+                                value={g?.url ?? ""}
+                                onChange={(e) => setG({ url: e.target.value })}
+                                placeholder="git.example.com" /* an example host, the same in every language */
+                              />
+                            </div>
+                            {isRefusedHttpUrl(g?.url) && (
+                              <div className="error-row"><AlertTriangle size={12} /> {t("gitea_err_http")}</div>
+                            )}
+                            <div className="field-group">
+                              <label className="field-label">{t("opt_gitea_token_label")}</label>
+                              <SecretField
+                                value={g?.token ?? ""}
+                                placeholder="••••••••"
+                                sensitive
+                                onChange={(v) => setG({ token: v })}
+                              />
+                            </div>
+                            <div className="field-row-2">
+                              <div className="field-group" style={{ flex: 2 }}>
+                                <label className="field-label">{t("opt_github_repo_label")}</label>
+                                <input
+                                  className="field-input mono"
+                                  value={g?.repo ?? ""}
+                                  onChange={(e) => setG({ repo: e.target.value })}
+                                  placeholder="username/repo-name"
+                                />
+                              </div>
+                              <div className="field-group" style={{ flex: 1 }}>
+                                <label className="field-label">{t("opt_github_branch_label")}</label>
+                                <input
+                                  className="field-input mono"
+                                  value={g?.branch ?? "main"}
+                                  onChange={(e) => setG({ branch: e.target.value })}
+                                  placeholder="main"
+                                />
+                              </div>
+                            </div>
+                            {p.noteKey && <InfoHint>{t(p.noteKey)}</InfoHint>}
+                            {/* Only once the address is one Konode would connect to: the link
+                                is built from what the user typed. */}
+                            {base && isSecureBackendUrl(base) && (
+                              <a
+                                href={`${base}/user/settings/applications`}
+                                target="_blank" rel="noreferrer"
+                                className="link-external"
+                              >
+                                <ExternalLink size={12} /> {t("gitea_token_link")}
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Inside the card, under the fields it checks. It tests what is in
                           the form rather than what is saved, and the form IS this card, so
@@ -2200,6 +2404,22 @@ export default function OptionsApp() {
                     <span className="toggle-track"><span className="toggle-thumb" /></span>
                   </label>
                 </div>
+                {/* On unless turned off (asked for on Reddit after 1.6.0). The worker rebuilds
+                    the menu when this changes; the popup's paper plane stays either way. Not
+                    shown where the browser has no context menus (Firefox for Android). */}
+                {hasContextMenus && (
+                <div className="settings-row">
+                  <div className="settings-row-left">
+                    <div><div className="row-label">{t("opt_send_menu_label")}</div><div className="row-desc">{t("opt_send_menu_desc")}</div></div>
+                  </div>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" className="toggle-input" checked={sendContextMenuOn(settings)}
+                      aria-label={t("opt_send_menu_label")}
+                      onChange={(e) => update({ send_context_menu: e.target.checked })} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                )}
                 <div className="settings-row">
                   <div className="settings-row-left">
                     <div><div className="row-label">{t("opt_interval_label")}</div><div className="row-desc">{t("opt_interval_desc")}</div></div>

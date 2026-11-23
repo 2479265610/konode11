@@ -3,16 +3,25 @@ import { sendMessage, request } from "@/lib/utils/messaging";
 import { browser } from "@/lib/utils/ext";
 import { t, tParts } from "@/lib/utils/i18n";
 import { interactiveSignIn, isDriveAuthAvailable, getStoredGDriveUser } from "@/lib/backends/gdrive-oauth";
+import {
+  interactiveDropboxSignIn, isDropboxAuthAvailable, getStoredDropboxUser, DROPBOX_ORIGINS,
+} from "@/lib/backends/dropbox-oauth";
 import { loadDraft, saveDraft, clearDraft, type DraftStep } from "@/lib/onboarding-draft";
-import { isRefusedHttpUrl } from "@/lib/utils/url";
+import { isRefusedHttpUrl, isSecureBackendUrl } from "@/lib/utils/url";
+import { forgeBaseUrl } from "@/lib/backends/gitea-backend";
 
 // Some engines (notably iOS WebKit, e.g. Orion) don't support interactive Google
 // sign-in; gate the Drive option so users aren't sent into a dead end.
 const DRIVE_AVAILABLE = isDriveAuthAvailable();
+// Dropbox signs in through the same auth window, so the same engines lack it.
+const DROPBOX_AVAILABLE = isDropboxAuthAvailable();
+/** A sign-in card this browser cannot complete: dimmed, and said so on the card. */
+const signInOff = (p: { signIn?: boolean; backend: BackendType }): boolean =>
+  !!p.signIn && !(p.backend === "dropbox" ? DROPBOX_AVAILABLE : DRIVE_AVAILABLE);
 import type { BackendType, BookmarkExclusion, DataType, SyncSettings } from "@/lib/types";
 import { BookmarkExclusionTree } from "@/lib/ui/bookmark-exclusion-tree";
 import {
-  allDataTypeAvailability, ensurePermissionWatched, unsupportedReason,
+  allDataTypeAvailability, ensurePermission, ensurePermissionWatched, unsupportedReason,
   permissionsToEnable, tabGroupsAskable, type Availability,
 } from "@/lib/utils/capabilities";
 import {
@@ -67,6 +76,11 @@ export default function OnboardingApp() {
   const [gdriveConnecting, setGdriveConnecting] = useState(false);
   const [gdriveError, setGdriveError] = useState<string | null>(null);
 
+  // Dropbox, the same three as Drive
+  const [dropboxUser, setDropboxUser] = useState<{ email: string; displayName: string; account_id: string } | null>(null);
+  const [dropboxConnecting, setDropboxConnecting] = useState(false);
+  const [dropboxError, setDropboxError] = useState<string | null>(null);
+
   // GitHub
   const [githubToken, setGithubToken] = useState("");
   const [githubRepo, setGithubRepo] = useState("");
@@ -75,6 +89,13 @@ export default function OnboardingApp() {
   const [githubChecking, setGithubChecking] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [githubError, setGithubError] = useState<string | null>(null);
+  // Gitea / Forgejo. Its own fields, not GitHub's: a token typed for one forge must never
+  // be sent to the other. Not checked as it is typed, unlike GitHub's: the instance can be
+  // reached only once its host permission is granted, which Finish asks for.
+  const [giteaUrl, setGiteaUrl] = useState("");
+  const [giteaToken, setGiteaToken] = useState("");
+  const [giteaRepo, setGiteaRepo] = useState("");
+  const [giteaBranch, setGiteaBranch] = useState("main");
   // Latest-wins guard + debounce timer for the token check. See scheduleVerify.
   const verifySeq = useRef(0);
   const verifyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -148,6 +169,8 @@ export default function OnboardingApp() {
   const backend: BackendType | null = provider ? providerById(provider).backend : null;
   const effectiveWebdavUrl = provider === "nextcloud" ? nextcloudUrl(ncHost, webdavUser) : webdavUrl;
   const webdavUrlRefused = isRefusedHttpUrl(effectiveWebdavUrl);
+  const giteaBase = forgeBaseUrl(giteaUrl);
+  const giteaUrlRefused = isRefusedHttpUrl(giteaUrl);
 
   // Per-card WebDAV credentials, remembered while the wizard is open. The fields are
   // shared by every WebDAV card, so switching swaps them rather than wiping them —
@@ -181,6 +204,10 @@ export default function OnboardingApp() {
   const syncingTo = (url: string) => {
     const [before, after] = tParts("provider_syncing_to");
     return <>{before}<code>{url}</code>{after}</>;
+  };
+  const dropboxFolderHint = () => {
+    const [before, after] = tParts("opt_dropbox_folder_hint");
+    return <>{before}<code>Apps/Konode</code>{after}</>;
   };
   // The pCloud hint names the region that is actually selected ("Pick the EU region if
   // that is where your account lives"), so it needs the label of the chosen one rather
@@ -248,10 +275,11 @@ export default function OnboardingApp() {
   useEffect(() => {
     void (async () => {
       try {
-        const [res, draft, driveUser] = await Promise.all([
+        const [res, draft, driveUser, dbxUser] = await Promise.all([
           request({ type: "GET_SETTINGS" }),
           loadDraft().catch(() => null),
           getStoredGDriveUser().catch(() => null),
+          getStoredDropboxUser().catch(() => null),
         ]);
         const detected = res.ok && res.res.type === "SETTINGS" ? res.res.payload.device_label ?? "" : "";
         // interactiveSignIn stores the session as it completes, so a sign-in that finished
@@ -259,6 +287,7 @@ export default function OnboardingApp() {
         // from its own state, showed a signed-in user as signed out, and sent them back
         // through Google's consent: on a phone, the same trip that lost the page.
         if (driveUser) setGdriveUser(driveUser);
+        if (dbxUser) setDropboxUser(dbxUser);
         if (!draft) {
           setDeviceLabel(detected);
           return;
@@ -269,6 +298,10 @@ export default function OnboardingApp() {
         setGithubToken(draft.githubToken);
         setGithubRepo(draft.githubRepo);
         setGithubBranch(draft.githubBranch);
+        setGiteaUrl(draft.giteaUrl);
+        setGiteaToken(draft.giteaToken);
+        setGiteaRepo(draft.giteaRepo);
+        setGiteaBranch(draft.giteaBranch);
         setWebdavUrl(draft.webdavUrl);
         setWebdavUser(draft.webdavUser);
         setWebdavPass(draft.webdavPass);
@@ -297,12 +330,14 @@ export default function OnboardingApp() {
       void saveDraft({
         step: step as DraftStep, deviceLabel, provider,
         githubToken, githubRepo, githubBranch,
+        giteaUrl, giteaToken, giteaRepo, giteaBranch,
         webdavUrl, webdavUser, webdavPass, ncHost,
         dataTypes, bookmarkExclusions: exclusions,
       }).catch(() => { /* a draft that cannot be written costs a retype, nothing more */ });
     }, 300);
     return () => clearTimeout(id);
   }, [restored, step, deviceLabel, provider, githubToken, githubRepo, githubBranch,
+    giteaUrl, giteaToken, giteaRepo, giteaBranch,
     webdavUrl, webdavUser, webdavPass, ncHost, dataTypes, exclusions]);
 
   useEffect(() => {
@@ -345,7 +380,9 @@ export default function OnboardingApp() {
   const canProceedBackend = () => {
     if (!provider) return false;
     if (provider === "gdrive") return !!gdriveUser;
+    if (provider === "dropbox") return !!dropboxUser;
     if (provider === "github") return !!githubUser && !!githubRepo;
+    if (provider === "gitea") return !!giteaBase && isSecureBackendUrl(giteaBase) && !!giteaToken.trim() && !!giteaRepo.trim();
     if (provider === "nextcloud") return !!(ncHost && webdavUser && webdavPass);
     if (webdavUrlRefused) return false;
     return !!(effectiveWebdavUrl && webdavUser && webdavPass);
@@ -397,6 +434,22 @@ export default function OnboardingApp() {
         return;
       }
     }
+    if (backend === "gitea") {
+      // The same rules as WebDAV just above, for the same reasons: synchronous, so the
+      // gesture survives, and a restored draft may carry an address Continue would refuse.
+      if (!giteaBase) {
+        setSetupError(t("gitea_err_bad_url"));
+        return;
+      }
+      if (!isSecureBackendUrl(giteaBase)) {
+        setSetupError(t("gitea_err_http"));
+        return;
+      }
+      origins.push(new URL(giteaBase).origin + "/*");
+    }
+    // Granted at sign-in already, so normally no prompt: asked again in case it was taken
+    // back in the browser's settings since.
+    if (backend === "dropbox") origins.push(...DROPBOX_ORIGINS);
 
     const seq = ++finishSeq.current;
     if (optPerms.length || origins.length) {
@@ -424,7 +477,10 @@ export default function OnboardingApp() {
         setSetupError(
           outcome === "cannot-prompt"
             ? t("onb_err_perms_no_prompt")
-            : t(origins.length ? "onb_err_perms_webdav" : "onb_err_perms_types")
+            : !origins.length
+              ? t("onb_err_perms_types")
+              : backend === "gitea" ? t("gitea_err_perms")
+              : backend === "dropbox" ? t("dropbox_err_perms") : t("onb_err_perms_webdav")
         );
         return;
       }
@@ -445,10 +501,19 @@ export default function OnboardingApp() {
       if (backend === "gdrive") {
         // The session (incl. refresh token) was already persisted by connectGDrive.
         backends.push({ type: "gdrive" as const, label: "Google Drive", enabled: true, gdrive: {} });
+      } else if (backend === "dropbox") {
+        // The session was persisted by connectDropbox; the account goes into the config,
+        // which the destination tag is built from.
+        backends.push({ type: "dropbox" as const, label: "Dropbox", enabled: true, dropbox: { account: dropboxUser?.account_id } });
       } else if (backend === "github") {
         backends.push({
           type: "github" as const, label: "GitHub", enabled: true,
           github: { token: githubToken, repo: githubRepo, branch: githubBranch.trim() || "main" },
+        });
+      } else if (backend === "gitea") {
+        backends.push({
+          type: "gitea" as const, label: "Gitea / Forgejo", enabled: true,
+          gitea: { url: giteaBase, token: giteaToken.trim(), repo: giteaRepo.trim(), branch: giteaBranch.trim() || "main" },
         });
       } else if (backend === "webdav") {
         backends.push({
@@ -512,6 +577,28 @@ export default function OnboardingApp() {
         setGdriveError(err instanceof Error ? err.message : t("onb_signin_failed"));
       } finally {
         setGdriveConnecting(false);
+      }
+    })();
+  };
+
+  // ─── Dropbox OAuth ─────────────────────────────────────────────────────
+
+  /** The API hosts first, while the click's gesture is live, then the sign-in window. */
+  const connectDropbox = () => {
+    setDropboxConnecting(true); setDropboxError(null);
+    void (async () => {
+      try {
+        const outcome = await ensurePermission({ origins: DROPBOX_ORIGINS });
+        if (outcome !== "granted") {
+          setDropboxError(outcome === "cannot-prompt" ? t("dropbox_err_perms_no_prompt") : t("dropbox_err_perms"));
+          return;
+        }
+        const s = await interactiveDropboxSignIn();
+        setDropboxUser({ email: s.email, displayName: s.displayName, account_id: s.account_id });
+      } catch (err) {
+        setDropboxError(err instanceof Error ? err.message : t("onb_signin_failed"));
+      } finally {
+        setDropboxConnecting(false);
       }
     })();
   };
@@ -628,7 +715,8 @@ export default function OnboardingApp() {
               const on = provider === p.id;
               // No Google sign-in here at all (Firefox for Android has no identity API): said on
               // the card itself, as the unsupported Bookmarks row is, not only once it is picked.
-              const driveOff = p.id === "gdrive" && !DRIVE_AVAILABLE;
+              const driveOff = signInOff(p);
+              const offText = p.backend === "dropbox" ? t("opt_dropbox_unavailable") : t("onb_drive_unavailable");
               return (
                 <div
                   key={p.id}
@@ -641,7 +729,7 @@ export default function OnboardingApp() {
                     <ProviderLogo id={p.id} size={18} color={on ? "var(--text-primary)" : "var(--text-secondary)"} />
                     <div>
                       <div style={S.backendName}>{providerLabel(p)}</div>
-                      <div style={S.backendDesc}>{driveOff ? t("onb_drive_unavailable") : t(p.descKey)}</div>
+                      <div style={S.backendDesc}>{driveOff ? offText : t(p.descKey)}</div>
                     </div>
                     <div style={{ ...S.radio, ...(on ? S.radioChecked : {}) }} />
                   </div>
@@ -676,6 +764,33 @@ export default function OnboardingApp() {
                           {gdriveError && <div style={S.errorRow}><XCircle size={12} /> {gdriveError}</div>}
                         </>
                       )}
+                    </div>
+                  )}
+
+                  {/* Dropbox: a sign-in, like Drive */}
+                  {on && p.backend === "dropbox" && (
+                    <div style={S.authPanel} onClick={(e) => e.stopPropagation()}>
+                      {dropboxUser ? (
+                        <div style={S.verifiedRow}>
+                          <CheckCircle2 size={14} color="var(--success)" />
+                          <span style={{ color: "var(--success)", fontSize: 14 }}>
+                            <bdi>{dropboxUser.displayName}</bdi>{dropboxUser.email ? ` (${dropboxUser.email})` : ""}
+                          </span>
+                        </div>
+                      ) : driveOff ? (
+                        <div style={S.errorRow}>
+                          <XCircle size={12} /> {offText}
+                        </div>
+                      ) : (
+                        <>
+                          <button style={S.btnGoogle} onClick={(e) => { e.stopPropagation(); connectDropbox(); }} disabled={dropboxConnecting}>
+                            {dropboxConnecting ? <Loader2 size={14} className="spin" /> : <ProviderLogo id="dropbox" size={14} color="#0061FE" />}
+                            {dropboxConnecting ? t("onb_connecting") : t("onb_sign_in_dropbox")}
+                          </button>
+                          {dropboxError && <div style={S.errorRow}><XCircle size={12} /> {dropboxError}</div>}
+                        </>
+                      )}
+                      <div style={hintStyle}>{dropboxFolderHint()}</div>
                     </div>
                   )}
 
@@ -783,6 +898,46 @@ export default function OnboardingApp() {
                       >
                         {t("onb_github_token_link")}
                       </a>
+                    </div>
+                  )}
+
+                  {/* Gitea / Forgejo: the instance's address, then GitHub's fields */}
+                  {on && p.backend === "gitea" && (
+                    <div style={S.authPanel} onClick={(e) => e.stopPropagation()}>
+                      <input style={{ ...S.input, fontFamily: "monospace" }}
+                        placeholder="git.example.com" /* an example host, the same in every language */
+                        value={giteaUrl} onChange={(e) => setGiteaUrl(e.target.value)} />
+                      {giteaUrlRefused && (
+                        <div style={S.errorRow} role="alert"><XCircle size={12} style={{ flexShrink: 0 }} /> {t("gitea_err_http")}</div>
+                      )}
+                      <div style={{ position: "relative" }}>
+                        <input
+                          style={{ ...S.input, fontFamily: "monospace", paddingRight: 32 }}
+                          type={showToken ? "text" : "password"}
+                          placeholder={t("opt_gitea_token_label")}
+                          value={giteaToken}
+                          onChange={(e) => setGiteaToken(e.target.value)}
+                        />
+                        <button style={S.eyeBtn} onClick={() => setShowToken(v => !v)}>
+                          {showToken ? <EyeOff size={12} /> : <Eye size={12} />}
+                        </button>
+                      </div>
+                      <input style={{ ...S.input, fontFamily: "monospace" }}
+                        placeholder="username/konode-sync"
+                        value={giteaRepo} onChange={(e) => setGiteaRepo(e.target.value)} />
+                      <input style={{ ...S.input, fontFamily: "monospace" }}
+                        placeholder={t("onb_github_branch_placeholder")}
+                        value={giteaBranch} onChange={(e) => setGiteaBranch(e.target.value)} />
+                      {p.noteKey && <div style={hintStyle}>{t(p.noteKey)}</div>}
+                      {giteaBase && isSecureBackendUrl(giteaBase) && (
+                        <a
+                          href={`${giteaBase}/user/settings/applications`}
+                          target="_blank" rel="noreferrer"
+                          style={{ fontSize: 12, color: "var(--text-link)", textDecoration: "none", marginTop: 4, display: "inline-block" }}
+                        >
+                          {t("gitea_token_link")}
+                        </a>
+                      )}
                     </div>
                   )}
                 </div>

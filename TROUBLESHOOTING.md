@@ -13,8 +13,10 @@ Edit a bookmark and this device uploads in about a second, as long as **Sync on 
 on (it is by default, under Settings → Device). The *receiving* device finds out
 on its next scheduled pull, which is every 60 seconds by default. You can move that to
 anywhere between 30 and 600 seconds under **Settings → Device → Sync interval**; 30s is the
-browser's minimum for a background check, so that's the floor, not a bug. History, open
-tabs and the extension list have no instant path at all: they travel on that same interval.
+browser's minimum for a background check, so that's the floor, not a bug. Open tabs and
+the extension list have no instant path at all: they travel on that same interval. From the
+next version, history goes out less often: a device sends it at most every 15 minutes,
+because it changes with almost every page you open. **Sync now** sends it at once.
 
 **Nothing syncs on its own any more, but Sync now works.**
 Check the popup's status. If it says **Paused**, automatic sync was paused from the popup's
@@ -24,12 +26,14 @@ change** are on under Settings → Device.
 
 **The browser freezes or stutters about once a minute, with History on.**
 Reported on Edge ([#96](https://github.com/konabe-studio/konode/issues/96)). On every sync,
-Konode compares the other devices' history with this browser's, and to do that it reads the
-local history, up to 100,000 pages, whether or not anything changed. With a long history,
-that is a lot of work every minute. Until a fix ships, turn **History** off under Settings →
-Data Types and click **Save changes**, or raise **Sync interval** under Settings → Device so
-it happens less often. A fix that reads only the stretch of history your other devices
-actually cover is being worked on.
+Konode downloaded every other device's whole history file and compared it with this
+browser's history, which with several devices in use and long histories is a lot of work
+every minute. 1.6.0 reads only the stretch of local history the other devices cover. The
+next version also leaves unchanged files where they are, sends a device's history at most
+every 15 minutes, and compares only what is new since the last time it heard from each
+device. Until you have it, turn **History** off under Settings → Data Types and click
+**Save changes**, or raise **Sync interval** under Settings → Device so it happens less
+often.
 
 **Bookmarks I deleted came back / a big cleanup didn't propagate.**
 Konode has a safety cap: it won't apply other devices' deletions that would remove more
@@ -71,7 +75,10 @@ faithful timeline.
 A device appears there once it has synced on the version that has Send to device, since an
 older one would never open what it was sent. Update it and let it sync once. With
 end-to-end encryption on, a device that cannot read your encrypted data (a different
-passphrase, or encryption off) is not offered either.
+passphrase, or encryption off) is not offered either. Until one of your other devices can
+receive, the right-click menu has no Send to device entry at all. If it is still missing
+after that, check that **Send to device in the right-click menu** is on under Settings →
+Device → Sync behavior.
 
 **I sent a tab and it hasn't opened on the other device.**
 It opens at that device's next sync, not at once: Konode has no server to push it there, so

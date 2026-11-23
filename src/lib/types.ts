@@ -3,7 +3,7 @@ import type { RootKind } from "@/lib/utils/bookmark-roots";
 // ─── Core Types ────────────────────────────────────────────────────────────
 
 export type DataType = "bookmarks" | "history" | "sessions" | "extensions";
-export type BackendType = "gdrive" | "webdav" | "github";
+export type BackendType = "gdrive" | "webdav" | "github" | "gitea" | "dropbox";
 export type SyncStatus = "idle" | "syncing" | "success" | "error" | "conflict";
 export type ConflictStrategy = "lww" | "prefer-local" | "prefer-remote" | "manual";
 
@@ -367,6 +367,22 @@ export interface BackendConfig {
     branch?: string;
     path?: string; // subfolder in repo, default "konode"
   };
+  // Gitea / Forgejo: the GitHub block plus the instance address. A block of its own, not
+  // a base URL on GitHub's, so switching cards can never send one forge's token to the other.
+  gitea?: {
+    url?: string; // the instance, e.g. "https://git.example.com" (a subpath install keeps its path)
+    token?: string;
+    repo?: string; // "owner/repo"
+    branch?: string;
+    path?: string; // subfolder in repo, default "konode"
+  };
+  // Dropbox: no fields to type, the sign-in is the setup. `account` is the account id the
+  // device signed in with (`dbid:…`), written at sign-in. It is in the config so the
+  // destination tag changes with the account, and a device moved to another Dropbox
+  // re-uploads into it instead of trusting checksums recorded for the old one.
+  dropbox?: {
+    account?: string;
+  };
 }
 
 // ─── Extension Settings ────────────────────────────────────────────────────
@@ -405,6 +421,12 @@ export interface SyncSettings {
    * affected: pinned tabs are still published, marked `pinned`.
    */
   restore_pinned_tabs?: boolean;
+  /**
+   * Whether "Send to device" sits in the browser's right-click menu. Device-local, like every
+   * setting. The popup's paper-plane icon is not affected. Optional: absent, as in settings
+   * stored by an older build, means on, so the menu stays where 1.6.0 put it.
+   */
+  send_context_menu?: boolean;
   notifications_enabled: boolean;
   debug_mode: boolean;
   // E2EE (opt-in) — wired into the sync engine; see src/lib/crypto/encryption.ts
@@ -544,6 +566,16 @@ export interface IBackend {
   // newest-first by packet timestamp (`orderPeersByTime`), so backends may return
   // files in any order (e.g. directory-listing order).
   downloadAll(data_type: DataType, excludeDeviceId?: string): Promise<SyncPacket[]>;
+  // The same pull, minus the peers whose file has not changed since this device last read
+  // it (#96). `known` maps a peer's device id to the change marker its file's listing
+  // carried then; a peer whose listing still carries that marker is reported in
+  // `unchanged` and not downloaded. Optional so a test backend may implement downloadAll
+  // alone, and the engine then downloads everything as it always did.
+  downloadChanged?(
+    data_type: DataType,
+    excludeDeviceId: string,
+    known: Record<string, string>
+  ): Promise<PeerPull>;
   // `listVersions` used to sit here, returning [] from all three backends because none of
   // them can answer it: Drive, GitHub and WebDAV expose file history in three unrelated
   // ways and we never called it. Restore points are ordinary files we write ourselves
@@ -563,6 +595,39 @@ export interface IBackend {
   // that backend leaves this out and callers fall back to what they did before (#30).
   listFilesWithTimes?(prefix: string): Promise<ListedFile[]>;
   deleteFile(name: string): Promise<void>;
+}
+
+/**
+ * A peer file the listing named, with what the listing said about its version.
+ *
+ * `marker` is whatever the listing carries for free that moves when the file does: Drive's
+ * `md5Checksum`, the git blob `sha` on GitHub, the `getetag` of a WebDAV PROPFIND. `null`
+ * when the listing gave none (or only a weak ETag), and such a file is always downloaded.
+ *
+ * `exact` says the marker is derived from the content itself, so an equal marker IS equal
+ * content (Drive, GitHub). A WebDAV ETag is not: many servers build it from the
+ * modification time, whole seconds, and the size, so a rewrite of the same length inside
+ * the second it was read keeps the same ETag. The engine trusts such a marker only once a
+ * read taken well after the marker was first listed has confirmed it.
+ */
+export interface PeerFile {
+  device_id: string;
+  marker: string | null;
+  exact: boolean;
+}
+
+export interface PeerPull {
+  /** Peers downloaded this time, each with its file as the listing described it. */
+  fetched: Array<{ packet: SyncPacket; file: PeerFile }>;
+  /** Peers whose listing marker equals the `known` one: listed, not downloaded. */
+  unchanged: PeerFile[];
+}
+
+/** The device id in a `konode_<type>_<device>.json` name, or null when it is not one. */
+export function peerDeviceId(name: string, data_type: DataType): string | null {
+  const prefix = `konode_${data_type}_`;
+  if (!name.startsWith(prefix) || !name.endsWith(".json")) return null;
+  return name.slice(prefix.length, -".json".length) || null;
 }
 
 export interface ListedFile {

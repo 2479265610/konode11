@@ -127,6 +127,10 @@ export const KEYS = {
   HIST_REJECTED: "konode_hist_rejected",
   HIST_VISITTIME_OK: "konode_hist_visittime_ok",
   HIST_APPLIED: "konode_hist_applied",
+  HIST_REACH: "konode_hist_reach",
+  HIST_PUBLISHED: "konode_hist_published",
+  // One key per data type, `konode_peer_files_<type>` (#96, see peerFilesKey).
+  PEER_FILES_PREFIX: "konode_peer_files_",
   // Sent tabs (#92, lib/sync/sent-tabs.ts).
   SENT_OUT: "konode_sent_out",
   SENT_OPENED: "konode_sent_opened",
@@ -144,6 +148,9 @@ export const KEYS = {
   SYNC_LOCK: "konode_sync_lock",
   GDRIVE_SESSION: "konode_gdrive_session",
   GDRIVE_FOLDER: "konode_gdrive_folder",
+  // Dropbox's OAuth session (lib/backends/dropbox-oauth.ts): refresh token, access token,
+  // the account it belongs to. Device-local like every credential.
+  DROPBOX_SESSION: "konode_dropbox_session",
   ONBOARDING_DRAFT: "konode_onboarding_draft",
   // The one-time rating card (lib/rate-prompt.ts). Two keys because two contexts write:
   // the service worker counts into PROGRESS, the popup records the answer in ANSWERED.
@@ -271,6 +278,19 @@ export async function getRestorePinnedTabs(): Promise<boolean> {
   const stored = await get<Partial<SyncSettings>>(KEYS.SETTINGS, {});
   return stored.restore_pinned_tabs === true;
 }
+
+/**
+ * Whether "Send to device" belongs in the right-click menu, straight from the stored settings
+ * for the same reason as getRestorePinnedTabs: the worker rebuilds the menu at startup, before
+ * anything should mint a device id. Absent means on.
+ */
+export async function getSendContextMenu(): Promise<boolean> {
+  const stored = await get<Partial<SyncSettings>>(KEYS.SETTINGS, {});
+  return sendContextMenuOn(stored);
+}
+
+/** The switch as a settings object holds it: anything but an explicit `false` is on. */
+export const sendContextMenuOn = (s: Partial<SyncSettings> | undefined): boolean => s?.send_context_menu !== false;
 
 export async function saveSettings(partial: Partial<SyncSettings>): Promise<SyncSettings> {
   const current = await getSettings();
@@ -622,12 +642,102 @@ export async function getAppliedHistory(): Promise<Record<string, string>> {
   const v = await get<Record<string, string>>(KEYS.HIST_APPLIED, {});
   return v && typeof v === "object" ? v : {};
 }
-export async function recordAppliedHistory(deviceId: string, checksum: string): Promise<void> {
+export async function recordAppliedHistory(
+  deviceId: string,
+  checksum: string,
+  reach?: HistoryReach | null,
+): Promise<void> {
   if (!deviceId) return;
   await updateKey<Record<string, string>>(KEYS.HIST_APPLIED, (current) => ({
     ...(current ?? {}),
     [deviceId]: checksum,
   }), {});
+  await updateKey<Record<string, HistoryReach>>(KEYS.HIST_REACH, (current) => {
+    const map = { ...(current ?? {}) };
+    // A packet with no dated entry says nothing about where the next one starts, so the
+    // old record goes rather than standing for a packet it no longer describes.
+    if (reach) map[deviceId] = reach;
+    else delete map[deviceId];
+    return map;
+  }, {});
+}
+
+/**
+ * The visit times a peer's last imported history packet spanned (#96): its newest and its
+ * oldest `lastVisitTime`, in the peer's own clock. The next CHANGED packet from that peer
+ * is compared against local history only from `newest` on, since everything before it was
+ * weighed by that import already. See `historySinceApplied`.
+ */
+export interface HistoryReach {
+  newest: number;
+  oldest: number;
+}
+
+/** Device id → the reach of its last imported history packet. Written with konode_hist_applied. */
+export async function getHistoryReach(): Promise<Record<string, HistoryReach>> {
+  const v = await get<Record<string, HistoryReach>>(KEYS.HIST_REACH, {});
+  return v && typeof v === "object" ? v : {};
+}
+
+/**
+ * When this device last exported its history to decide what to publish, epoch ms (#96).
+ * History is published at most every `HISTORY_PUBLISH_EVERY_MS` on a scheduled sync, so
+ * a device in use does not rewrite its whole history file, and every peer download it,
+ * once a minute. Null before the first.
+ */
+export async function getHistoryPublishedAt(): Promise<number | null> {
+  const v = await get<number | null>(KEYS.HIST_PUBLISHED, null);
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+export async function setHistoryPublishedAt(at: number): Promise<void> {
+  await set(KEYS.HIST_PUBLISHED, at);
+}
+
+// ─── Peer files read (#96) ──────────────────────────────────────────────────
+
+/**
+ * A peer's sync file as this device last read it, so the next sync can leave it on the
+ * server while its listing still carries the same marker (see PeerFile in types.ts).
+ */
+export interface PeerFileRecord {
+  /** The listing's change marker for the file this record describes. */
+  marker: string;
+  /**
+   * Whether the marker may stand in for a download. An exact marker (a content hash) may at
+   * once; a WebDAV ETag only after a read made well after the marker was first listed.
+   */
+  settled: boolean;
+  /** When this device first saw the marker, epoch ms, taken after that listing returned. */
+  seen_at: number;
+  /**
+   * The packet behind the marker, handed to the sync in place of a download. History keeps
+   * the envelope alone (`payload: ""`): its packets run to megabytes and an unchanged one is
+   * never opened (see `applyRemote`), so the payload is fetched only if something asks.
+   */
+  packet: SyncPacket;
+}
+
+export interface PeerFileMemory {
+  /** Which folder the markers came from. Records from another one are ignored. */
+  scope: string;
+  peers: Record<string, PeerFileRecord>;
+}
+
+/**
+ * One key per data type, so a session or history change elsewhere doesn't rewrite the
+ * bookmark trees held here.
+ */
+export function peerFilesKey(dataType: DataType): string {
+  return `${KEYS.PEER_FILES_PREFIX}${dataType}`;
+}
+
+export async function getPeerFiles(dataType: DataType): Promise<PeerFileMemory | null> {
+  const v = await get<PeerFileMemory | null>(peerFilesKey(dataType), null);
+  return v && typeof v === "object" && typeof v.scope === "string" && v.peers && typeof v.peers === "object" ? v : null;
+}
+
+export async function setPeerFiles(dataType: DataType, memory: PeerFileMemory): Promise<void> {
+  await set(peerFilesKey(dataType), memory);
 }
 
 /**

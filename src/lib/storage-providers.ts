@@ -1,7 +1,7 @@
 // Shared storage-provider (card) model for the storage picker — consumed by BOTH
 // the options page and the onboarding wizard so the two never drift. A "provider"
 // is a card in the picker; several providers map to the same underlying WebDAV
-// backend (the sync engine only knows gdrive/webdav/github). Selecting a card sets
+// backend (the sync engine only knows gdrive/dropbox/webdav/github/gitea). Selecting a card sets
 // `active_backend` and, for WebDAV presets, the server URL — nothing about the sync
 // format changes, so switching a card is not a breaking change.
 
@@ -9,7 +9,7 @@ import type { BackendType } from "@/lib/types";
 import { t } from "@/lib/utils/i18n";
 
 export type ProviderId =
-  | "gdrive" | "koofr" | "pcloud" | "nextcloud" | "fastmail" | "jianguoyun" | "webdav" | "github";
+  | "gdrive" | "dropbox" | "koofr" | "pcloud" | "nextcloud" | "fastmail" | "jianguoyun" | "webdav" | "github" | "gitea";
 
 export interface ProviderDef {
   id: ProviderId;
@@ -24,7 +24,11 @@ export interface ProviderDef {
   hintKey: string;
   fixedUrl?: string;                                       // koofr, fastmail, jianguoyun
   regions?: { id: string; label: string; url: string }[];  // pcloud (EU/US)
-  needsHost?: boolean;                                      // nextcloud/ownCloud
+  needsHost?: boolean;                                      // nextcloud/ownCloud, gitea/forgejo
+  /** Set up by signing in to an account in the browser's auth window (`identity.
+   *  launchWebAuthFlow`), with no fields to type: Google Drive, Dropbox. Where the browser has
+   *  no such window (Firefox for Android) the card is dimmed and says so. */
+  signIn?: boolean;
   custom?: boolean;                                         // generic WebDAV (Synology, kDrive, …)
   /** Message key, not text. Extra hint shown once the card is selected. */
   noteKey?: string;
@@ -34,14 +38,24 @@ export interface ProviderDef {
 // Fastmail (myfiles.* roots straight into the user's files — no domain path), and
 // Nutstore / 坚果云 (2026-09). Box was dropped (discontinued WebDAV in 2023). Nextcloud/ownCloud/Synology need a per-user
 // host, so they take a host field (Nextcloud) or a full custom URL (WebDAV) instead.
-// Card order (2026-07): Google Drive leads (most familiar entry point), then the
-// privacy-friendly own-storage options, GitHub, and the generic WebDAV catch-all last.
+// Card order (2026-07): Google Drive leads (most familiar entry point), Dropbox next to it
+// (1.7.0), then the
+// privacy-friendly own-storage options, GitHub, Gitea / Forgejo, and the generic WebDAV
+// catch-all last.
 // Simplified Chinese moves Nutstore to the front: see `providerCards()`.
 export const PROVIDERS: ProviderDef[] = [
   {
-    id: "gdrive", backend: "gdrive", label: "Google Drive",
+    id: "gdrive", backend: "gdrive", label: "Google Drive", signIn: true,
     descKey: "provider_gdrive_desc",
     hintKey: "provider_gdrive_hint",
+  },
+  {
+    // Dropbox (1.7.0): an App folder, so Konode sees `Apps/Konode` and nothing else, with a
+    // PKCE sign-in that needs no app secret. See `dropbox-backend.ts` and `dropbox-oauth.ts`.
+    // Next to Drive: the other account most people already have.
+    id: "dropbox", backend: "dropbox", label: "Dropbox", signIn: true,
+    descKey: "provider_dropbox_desc",
+    hintKey: "provider_dropbox_hint",
   },
   {
     id: "nextcloud", backend: "webdav", label: "Nextcloud / ownCloud", needsHost: true,
@@ -89,16 +103,24 @@ export const PROVIDERS: ProviderDef[] = [
     noteKey: "provider_jianguoyun_note",
   },
   {
-    // GitHub ONLY. The backend hardcodes api.github.com and BackendConfig.github has
-    // no base-URL field, so this card must not name a host it can't reach: a user who
-    // believed the old "GitHub / Gitea / GitLab" label pasted a self-hosted instance's
-    // token and sent it straight to GitHub, then got a misleading "invalid token".
-    // Gitea would need an API base URL (its contents API is GitHub-shaped); GitLab's
-    // API differs entirely and needs its own backend. Until either ships, don't
-    // advertise them.
+    // GitHub ONLY. This card talks to api.github.com and must not name a host it can't
+    // reach: a user who believed the old "GitHub / Gitea / GitLab" label pasted a
+    // self-hosted instance's token and sent it straight to GitHub, then got a misleading
+    // "invalid token". Gitea and Forgejo have their own card below, with their own config
+    // block, so a token typed on one is never sent to the other. GitLab's API differs
+    // entirely and would need its own backend; until it ships, don't advertise it.
     id: "github", backend: "github", label: "GitHub",
     descKey: "provider_github_desc",
     hintKey: "provider_github_hint",
+  },
+  {
+    // Gitea and Forgejo (#32, #76): the GitHub backend on the user's own instance, see
+    // `gitea-backend.ts`. `needsHost` draws the host field; the instance's origin is asked
+    // for as an optional host permission at save time, as for a WebDAV server.
+    id: "gitea", backend: "gitea", label: "Gitea / Forgejo", needsHost: true,
+    descKey: "provider_gitea_desc",
+    hintKey: "provider_gitea_hint",
+    noteKey: "provider_gitea_note",
   },
   {
     id: "webdav", backend: "webdav", label: "WebDAV (other)", labelKey: "provider_webdav_other", custom: true,
@@ -213,6 +235,8 @@ export function providerFromConfig(
 ): ProviderId | null {
   if (backend === "gdrive") return "gdrive";
   if (backend === "github") return "github";
+  if (backend === "gitea") return "gitea";
+  if (backend === "dropbox") return "dropbox";
   if (backend === "webdav") {
     const url = webdavUrl ?? "";
     if (!url) return "webdav";

@@ -5,8 +5,40 @@ All notable changes to Konode. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **Dropbox storage.** A new **Dropbox** card, in setup and under Settings → Storage, next to
+  Google Drive. Sign in once and Konode syncs to a folder of its own, `Apps/Konode`, in your
+  Dropbox: it can't see or open anything else there. Konode asks your browser for permission
+  to reach Dropbox when you sign in. Each device signs in on its own, and **Disconnect** also
+  withdraws that device's access at Dropbox. Not available on Firefox for Android, which has
+  no sign-in window for extensions.
+- **Gitea and Forgejo storage (#32).** A new **Gitea / Forgejo** card, in setup and under
+  Settings → Storage, syncs to a private repository on your own Gitea or Forgejo server, the
+  way the GitHub card does on GitHub. Enter the server's address, the repository and an
+  access token with the repository permission set to Read and Write. Konode asks your
+  browser for permission to reach that server when you save, and connects only over
+  `https://` (or `http://` to a server on the same computer), because the token goes with
+  every request. Public repositories are refused, as on GitHub. Asked for in #32 and #76.
+- **Send to device can leave the right-click menu.** Turn off **Send to device in the
+  right-click menu** under Settings → Device → Sync behavior, and Konode adds nothing to the
+  menu you get by right-clicking a page, a link or a Firefox tab. The paper-plane icon in the
+  popup still sends the page you are on. It is on unless you turn it off, so nothing changes
+  until you do. Asked for on Reddit.
+
 ### Changed
 
+- **The Chrome zip on the GitHub release loads with a fixed extension id.** It used to get an
+  id made from the folder you unpacked it into, different on every computer, so no sign-in
+  that sends you back to the extension could ever work in it. It now carries the same id as a
+  build from source, which Dropbox sign-in is set up for. If you run an unpacked copy from an
+  older release zip, the new one loads as a separate extension: set it up again (your synced
+  data is in your storage, not in the extension), then remove the old copy. The store
+  versions are not affected.
+- **The Send to device entry waits for a device that can receive.** Until now every
+  right-click menu carried it, holding only a greyed-out "No device can receive tabs yet" on
+  a browser with no other device to send to. It now appears once one of your other devices
+  can receive, as the popup's paper-plane icon already did.
 - **Restoring another device's tabs leaves its pinned tabs out.** Pinned tabs are usually
   a device's own, such as mail or a calendar, and their addresses change as you use them,
   so they rarely matched the ones pinned here and a restore opened them again beside yours.
@@ -19,6 +51,28 @@ All notable changes to Konode. Format loosely follows
   an error or a conflict, so routine work looked like a warning. The icon now changes only
   when something needs you: a red **!** for an error, an orange **?** for a conflict. The
   popup still shows when a sync is running.
+- **Konode no longer downloads what has not changed (#96).** Every sync used to fetch each
+  of your other devices' files in full, whether or not anything was new in them. With
+  several devices and long histories that added up to megabytes a minute: one user's
+  Activity page showed 50 GB moved over about 3,200 syncs. Konode now checks the folder
+  listing it reads anyway, which says whether a file has changed, and leaves an unchanged
+  file where it is. A device that has been idle costs a sync nothing to download, and the
+  transferred total on the Activity page counts only what was actually moved. What arrives
+  is the same as before. On WebDAV, a newly changed file is read twice before Konode relies
+  on that answer, because many servers can't tell two writes within the same second apart.
+- **History syncs without slowing your browser when all your devices are in use (#96).**
+  While you browse, a device's history changes with almost every page, and its whole history
+  file was sent again at every sync. Each of your other devices then downloaded all of it
+  and checked it against weeks of local history, once a minute, which is the slowdown and
+  the freezes one user saw in Edge. Konode now sends a device's history at most every 15
+  minutes, and checks only what is new since the last time it heard from each device. A
+  page you visit reaches your other devices within about 15 minutes; **Sync now** still
+  sends it at once. Bookmarks, open tabs and extensions sync as often as before.
+
+### Fixed
+
+- **The unsaved-changes note in Settings is translated.** The line beside **Save changes**
+  that says an edit is still waiting showed in English in every language since 1.2.0.
 
 ## [1.6.0] - 2026-11-19
 

@@ -2,7 +2,7 @@
 // Handles: alarm-based polling, bookmark listeners, message routing
 
 import type { ExtensionMessage, ExtensionResponse, SyncState } from "@/lib/types";
-import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, KEYS } from "@/lib/utils/storage";
+import { getSettings, getState, setState, saveSettings, clearStaleSyncLock, setBulkDeleteApproval, sendContextMenuOn, KEYS } from "@/lib/utils/storage";
 import { SyncEngine, explainSyncFailure } from "@/lib/sync/sync-engine";
 import { registerBookmarkListeners, recordExclusionRelease } from "@/lib/handlers/bookmarks-handler";
 import { createBackend } from "@/lib/backends/abstract-backend";
@@ -13,8 +13,7 @@ import { ensureSyncAlarm, SYNC_ALARM, BOOKMARK_ALARM, periodicSyncWanted, change
 import { eventPresent } from "@/lib/utils/capabilities";
 import { clearExpiredDraft } from "@/lib/onboarding-draft";
 import { openConflictFromNotification } from "@/lib/sync/conflict-resolver";
-import { getSendTargets } from "@/lib/sync/sent-tabs";
-import { menusApi, rebuildSendMenu, sendRequestFromMenu } from "@/lib/sent-tabs-browser";
+import { menusApi, refreshSendMenu, sendRequestFromMenu } from "@/lib/sent-tabs-browser";
 
 // ─── State ────────────────────────────────────────────────────────────────
 
@@ -183,8 +182,11 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       // Await the sync so the pending message response keeps the MV3 worker alive
       // for its whole duration — otherwise a mid-sync suspension can skip the
       // lock's finally and strand the persisted lock until its TTL (C2).
+      // Asked for by a person (the Sync now button, a settings save, the end of setup), so
+      // this device's history goes out now rather than on its 15-minute cadence (#96).
       const outcome = await syncEngine.sync(
-        message.payload?.data_type ? [message.payload.data_type] : undefined
+        message.payload?.data_type ? [message.payload.data_type] : undefined,
+        { userAsked: true },
       );
       // Don't answer OK for a sync that never started. This used to be a blanket OK, so
       // a stranded lock made "Sync now" a no-op that reported success.
@@ -457,22 +459,28 @@ on("runtime", "onInstalled", () => browser.runtime.onInstalled.addListener(async
     browser.tabs.create({ url: browser.runtime.getURL("onboarding.html") });
   }
   await ensureInit();
-  await rebuildSendMenu(await getSendTargets());
+  await refreshSendMenu();
 }));
 
 on("runtime", "onStartup", () => browser.runtime.onStartup.addListener(async () => {
   await ensureInit();
-  await rebuildSendMenu(await getSendTargets());
+  await refreshSendMenu();
 }));
 
 // ─── Send to device (#92) ─────────────────────────────────────────────────
 
-// The menu follows the targets the last exchange found, whichever context wrote them.
+// The menu follows the targets the last exchange found, whichever context wrote them, and
+// the Settings switch that takes it out of the right-click menu. Settings are written on
+// every change of any field, so only a change of that one switch rebuilds.
 on("storage", "onChanged", () => browser.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !(KEYS.SEND_TARGETS in changes)) return;
-  const before = JSON.stringify(changes[KEYS.SEND_TARGETS].oldValue ?? []);
-  const after = changes[KEYS.SEND_TARGETS].newValue ?? [];
-  if (before !== JSON.stringify(after)) void rebuildSendMenu(after);
+  if (area !== "local") return;
+  const targets = changes[KEYS.SEND_TARGETS];
+  const settings = changes[KEYS.SETTINGS];
+  const targetsChanged = !!targets
+    && JSON.stringify(targets.oldValue ?? []) !== JSON.stringify(targets.newValue ?? []);
+  const switchChanged = !!settings
+    && sendContextMenuOn(settings.oldValue) !== sendContextMenuOn(settings.newValue);
+  if (targetsChanged || switchChanged) void refreshSendMenu();
 }));
 
 {
