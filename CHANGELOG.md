@@ -73,6 +73,40 @@ All notable changes to Konode. Format loosely follows
 
 - **The unsaved-changes note in Settings is translated.** The line beside **Save changes**
   that says an edit is still waiting showed in English in every language since 1.2.0.
+- **The encryption messages send you to the right place.** When your other devices are
+  encrypted and this one is not, or the passphrases differ, the message now points to
+  Settings → Storage, where the Encryption card is. It still said Settings → Advanced.
+- **A browser's own add-ons stay off your extension list.** Iceraven, and browsers built like
+  it, count parts of themselves (the "Mozilla Android Components") as installed add-ons, so
+  your other devices listed them as extensions you were missing. Konode leaves them out.
+- **A sign-in the browser refuses outright says so.** Yandex for Android closes the Google
+  sign-in window before any page opens. Konode said the window had closed and to try again,
+  which never works there. When the window closes too fast for anyone to have closed it, the
+  message now says the browser may not let extensions sign in, and names the storage that
+  needs no sign-in. The same goes for Dropbox.
+- **Konode no longer crashes in Yandex Browser on Android.** With Open tabs on, Yandex
+  Browser 26.11 for Android crashed Konode at every sync, about once a minute, and setup and
+  Settings kept showing the browser's "That was unexpected" page. Yandex grants the
+  permission Konode asks for to read tab group names and colours, but has nothing behind
+  it, and the first look at it closes Konode's process. On Android, in every browser, Konode
+  now never asks for that permission and never looks at it. Open tabs keep their groups
+  where the browser has them, without the names and colours. An install that already
+  granted the permission is fixed by the update alone, with nothing to change.
+- **A bookmark deleted on Opera or Vivaldi is now deleted on your other devices (#117).**
+  Neither browser deletes a bookmark straight away: each moves it into its Trash, and Konode
+  took that for an ordinary move, so the bookmark stayed on every other device. A bookmark
+  or folder that goes into the Trash now counts as deleted, and one you take back out comes
+  back on your other devices. Deletions made on your other devices already reached both
+  browsers. Bookmarks you deleted there before this version are still on your other devices,
+  so they come back once; delete them again and the deletion reaches every device.
+- **The Trash of Opera and Vivaldi, and Opera's Speed Dials and Pinboards, stay on that
+  browser (#117).** Konode synced them like bookmarks, so your other devices got what you
+  had deleted, your Speed Dials and your Pinboard entries, and deleting one of those copies
+  on another device sent the Speed Dial on Opera to its Trash. They are now left out of the
+  sync, the way a folder you exclude in Settings is. If you used Konode on Opera before,
+  your other devices keep the copies they were given, and Opera gets them back as ordinary
+  bookmarks on its first sync. Delete them on any device and they go everywhere, while your
+  Speed Dials stay as they are.
 
 ## [1.6.0] - 2026-11-19
 
